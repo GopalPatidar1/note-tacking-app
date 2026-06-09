@@ -192,6 +192,8 @@ POST /auth/login
 
 POST /auth/logout
 
+POST /auth/refresh
+
 POST /auth/forgot-password
 
 POST /auth/reset-password
@@ -347,6 +349,11 @@ AB-1008 → Sharing
 
 AB-1009 → Version History
 
-AB-1010–AB-1015 → Frontend
+AB-1010  Frontend — Auth pages
+AB-1011  Frontend — Notes list page
+AB-1012  Frontend — Note editor with TipTap + autosave
+AB-1013  Frontend — Search UI with highlights
+AB-1014  Frontend — Share modal + active links
+AB-1015  Frontend — Version history drawer + restore
 
 AB-1016 → Playwright E2E

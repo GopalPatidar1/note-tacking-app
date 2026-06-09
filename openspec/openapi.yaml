@@ -100,6 +100,13 @@ components:
           type: string
           format: date-time
 
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+
     RegisterRequest:
       type: object
       required: [name, email, password]
@@ -115,6 +122,8 @@ components:
         password:
           type: string
           minLength: 8
+          pattern: '^(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).+$'
+          description: Must contain ≥1 uppercase letter, ≥1 digit, ≥1 special character
           example: s3cur3P@ss
 
     LoginRequest:
@@ -158,6 +167,8 @@ components:
         newPassword:
           type: string
           minLength: 8
+          pattern: '^(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).+$'
+          description: Must contain ≥1 uppercase letter, ≥1 digit, ≥1 special character
 
     # ── tags ────────────────────────────────────────────────
     Tag:
@@ -602,10 +613,8 @@ paths:
   /auth/logout:
     post:
       tags: [Auth]
-      summary: Invalidate the current refresh token
+      summary: Invalidate the current refresh token (authenticated by refreshToken body only)
       operationId: logout
-      security:
-        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -628,6 +637,40 @@ paths:
                         example: Logged out
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Exchange a valid refresh token for a new token pair (rotation)
+      operationId: refreshTokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: New token pair issued; old refresh token invalidated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/AuthTokens"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          description: Refresh token not found, expired, or already rotated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  message: Refresh token is invalid or has expired
+                  code: INVALID_REFRESH_TOKEN
 
   /auth/forgot-password:
     post:

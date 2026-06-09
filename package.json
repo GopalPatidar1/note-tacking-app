@@ -1,0 +1,16 @@
+{
+  "name": "note-taking-app",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "dev:backend": "pnpm --filter backend dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "build": "pnpm --filter '@note-app/shared' build && pnpm --filter backend build",
+    "tsc": "tsc --noEmit -p tsconfig.json",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

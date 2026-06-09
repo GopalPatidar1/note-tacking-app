@@ -91,6 +91,18 @@ Acceptance Criteria:
 
 ---
 
+### FR-1.6 Token Refresh
+
+Users shall be able to exchange a valid refresh token for a new token pair.
+
+Acceptance Criteria:
+
+* Valid refresh token returns new access token (15 min) + new refresh token (7 days).
+* Old refresh token is invalidated on exchange (rotation).
+* Expired or unknown refresh token returns 401.
+
+---
+
 # FR-2 Notes Management
 
 ### FR-2.1 Create Note
