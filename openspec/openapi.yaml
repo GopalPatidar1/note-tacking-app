@@ -1,0 +1,1185 @@
+openapi: 3.0.3
+
+info:
+  title: Note Taking Application API
+  description: |
+    Secure note-taking platform — create, organize, search, share, and version notes.
+
+    **Auth flow:**
+    1. Register or login → receive `accessToken` (15 min) + `refreshToken` (7 days)
+    2. Pass `accessToken` as `Bearer` on every protected endpoint
+    3. On expiry, exchange `refreshToken` for new tokens (rotation — old token invalidated)
+    4. Logout deletes the refresh token row
+
+    **Response envelope:**
+    - Success: `{ "data": { ... } }`
+    - Error:   `{ "error": { "message": "...", "code": "..." } }`
+  version: 1.0.0
+  contact:
+    email: gopalp@mindfiresolutions.com
+
+servers:
+  - url: http://localhost:3000/api
+    description: Local development
+
+tags:
+  - name: Auth
+    description: Registration, login, logout, password reset
+  - name: Notes
+    description: CRUD for user notes (soft-delete, pagination, filtering)
+  - name: Tags
+    description: User-scoped tag management
+  - name: Search
+    description: PostgreSQL full-text search across notes
+  - name: Sharing
+    description: Public share links with expiry and revocation
+  - name: Versions
+    description: Per-save version snapshots and restore
+
+# ─────────────────────────────────────────────────────────────
+# Security scheme
+# ─────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  # ───────────────────────────────────────────────────────────
+  # Reusable schemas
+  # ───────────────────────────────────────────────────────────
+  schemas:
+
+    # ── primitives ──────────────────────────────────────────
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message, code]
+          properties:
+            message:
+              type: string
+              example: Note not found
+            code:
+              type: string
+              example: NOT_FOUND
+
+    # ── auth ────────────────────────────────────────────────
+    AuthTokens:
+      type: object
+      required: [accessToken, refreshToken]
+      properties:
+        accessToken:
+          type: string
+          description: JWT — expires in 15 minutes
+        refreshToken:
+          type: string
+          description: Opaque token — expires in 7 days; rotated on every use
+
+    UserPublic:
+      type: object
+      required: [id, name, email, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Alice
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          example: Alice
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+        password:
+          type: string
+          minLength: 8
+          example: s3cur3P@ss
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+        password:
+          type: string
+          example: s3cur3P@ss
+
+    LogoutRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+
+    ResetPasswordRequest:
+      type: object
+      required: [email, otp, newPassword]
+      properties:
+        email:
+          type: string
+          format: email
+        otp:
+          type: string
+          example: "482910"
+        newPassword:
+          type: string
+          minLength: 8
+
+    # ── tags ────────────────────────────────────────────────
+    Tag:
+      type: object
+      required: [id, userId, name, color]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Work
+        color:
+          type: string
+          example: "#3B82F6"
+        noteCount:
+          type: integer
+          description: Total non-deleted notes attached to this tag
+          example: 5
+
+    CreateTagRequest:
+      type: object
+      required: [name, color]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          example: Work
+        color:
+          type: string
+          example: "#3B82F6"
+
+    UpdateTagRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          example: Personal
+        color:
+          type: string
+          example: "#10B981"
+
+    # ── notes ───────────────────────────────────────────────
+    Note:
+      type: object
+      required: [id, userId, title, content, tags, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: Meeting notes
+        content:
+          type: string
+          example: "<p>Discussed Q3 roadmap…</p>"
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateNoteRequest:
+      type: object
+      required: [title, content]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          example: Meeting notes
+        content:
+          type: string
+          example: "<p>Discussed Q3 roadmap…</p>"
+        tagIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          default: []
+
+    UpdateNoteRequest:
+      type: object
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+        content:
+          type: string
+        tagIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    PaginatedNotes:
+      type: object
+      required: [items, total, page, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Note"
+        total:
+          type: integer
+          example: 42
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+
+    # ── search ──────────────────────────────────────────────
+    SearchResult:
+      type: object
+      required: [id, title, headline, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: Meeting notes
+        headline:
+          type: string
+          description: ts_headline excerpt with match highlights (HTML tags)
+          example: "Discussed <b>Q3</b> roadmap with the team"
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PaginatedSearchResults:
+      type: object
+      required: [items, total, page, limit, query]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResult"
+        total:
+          type: integer
+          example: 7
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        query:
+          type: string
+          example: roadmap
+
+    # ── sharing ─────────────────────────────────────────────
+    ShareLink:
+      type: object
+      required: [id, noteId, token, viewCount, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        noteId:
+          type: string
+          format: uuid
+        token:
+          type: string
+          example: a1b2c3d4e5f6
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+        viewCount:
+          type: integer
+          example: 12
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateShareLinkRequest:
+      type: object
+      properties:
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Optional expiry; omit for no expiry
+
+    PublicNote:
+      type: object
+      description: Read-only note view for unauthenticated public access
+      required: [id, title, content, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        content:
+          type: string
+        tags:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              color:
+                type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # ── versions ────────────────────────────────────────────
+    NoteVersion:
+      type: object
+      required: [id, noteId, title, content, versionNumber, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        noteId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: Meeting notes
+        content:
+          type: string
+        versionNumber:
+          type: integer
+          example: 3
+        createdAt:
+          type: string
+          format: date-time
+
+  # ───────────────────────────────────────────────────────────
+  # Reusable parameters
+  # ───────────────────────────────────────────────────────────
+  parameters:
+    pageParam:
+      in: query
+      name: page
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    limitParam:
+      in: query
+      name: limit
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    noteIdParam:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+    tagIdParam:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+    versionIdParam:
+      in: path
+      name: versionId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    shareLinkIdParam:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+    shareTokenParam:
+      in: path
+      name: token
+      required: true
+      schema:
+        type: string
+
+  # ───────────────────────────────────────────────────────────
+  # Reusable responses
+  # ───────────────────────────────────────────────────────────
+  responses:
+    Unauthorized:
+      description: Missing or invalid access token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: Unauthorized
+              code: UNAUTHORIZED
+    Forbidden:
+      description: Authenticated but not allowed to access this resource
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: Forbidden
+              code: FORBIDDEN
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: Not found
+              code: NOT_FOUND
+    ValidationError:
+      description: Request body or query parameters failed Zod validation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: "email: Invalid email"
+              code: VALIDATION_ERROR
+
+# ─────────────────────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────────────────────
+paths:
+
+  # ── Auth ──────────────────────────────────────────────────
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User created; tokens returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                      - $ref: "#/components/schemas/AuthTokens"
+                      - type: object
+                        properties:
+                          user:
+                            $ref: "#/components/schemas/UserPublic"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "409":
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  message: Email already in use
+                  code: EMAIL_CONFLICT
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in with email and password
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Tokens returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                      - $ref: "#/components/schemas/AuthTokens"
+                      - type: object
+                        properties:
+                          user:
+                            $ref: "#/components/schemas/UserPublic"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Invalidate the current refresh token
+      operationId: logout
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogoutRequest"
+      responses:
+        "200":
+          description: Logged out successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: Logged out
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password-reset OTP (logged to console)
+      operationId: forgotPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: OTP generated and logged (always 200 to avoid email enumeration)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: If that email exists, an OTP has been sent
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password using OTP
+      operationId: resetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: Password reset successful
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          description: Invalid or expired OTP
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  message: OTP is invalid or has expired
+                  code: INVALID_OTP
+
+  # ── Notes ─────────────────────────────────────────────────
+  /notes:
+    get:
+      tags: [Notes]
+      summary: List authenticated user's notes
+      operationId: listNotes
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/pageParam"
+        - $ref: "#/components/parameters/limitParam"
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [createdAt_asc, createdAt_desc, updatedAt_asc, updatedAt_desc, title_asc, title_desc]
+            default: updatedAt_desc
+        - in: query
+          name: tagId
+          schema:
+            type: string
+            format: uuid
+          description: Filter by tag
+      responses:
+        "200":
+          description: Paginated note list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PaginatedNotes"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      tags: [Notes]
+      summary: Create a new note (also creates version snapshot v1)
+      operationId: createNote
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateNoteRequest"
+      responses:
+        "201":
+          description: Note created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Note"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /notes/{id}:
+    get:
+      tags: [Notes]
+      summary: Get a single note by ID
+      operationId: getNote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/noteIdParam"
+      responses:
+        "200":
+          description: Note found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Note"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    patch:
+      tags: [Notes]
+      summary: Update a note (also creates a new version snapshot)
+      operationId: updateNote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/noteIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateNoteRequest"
+      responses:
+        "200":
+          description: Note updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Note"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      tags: [Notes]
+      summary: Soft-delete a note (sets deletedAt; purged after 30 days)
+      operationId: deleteNote
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/noteIdParam"
+      responses:
+        "200":
+          description: Note soft-deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: Note deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Tags ──────────────────────────────────────────────────
+  /tags:
+    get:
+      tags: [Tags]
+      summary: List all tags for the authenticated user (with note counts)
+      operationId: listTags
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Tag list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Tag"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      tags: [Tags]
+      summary: Create a tag
+      operationId: createTag
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTagRequest"
+      responses:
+        "201":
+          description: Tag created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /tags/{id}:
+    patch:
+      tags: [Tags]
+      summary: Update a tag
+      operationId: updateTag
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/tagIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTagRequest"
+      responses:
+        "200":
+          description: Tag updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      tags: [Tags]
+      summary: Delete a tag (detaches from all notes)
+      operationId: deleteTag
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/tagIdParam"
+      responses:
+        "200":
+          description: Tag deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: Tag deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Search ────────────────────────────────────────────────
+  /search:
+    get:
+      tags: [Search]
+      summary: Full-text search across note title and content
+      description: |
+        Uses PostgreSQL `plainto_tsquery` over a `tsvector(title || content)` index.
+        Results include `ts_headline` excerpts with match highlights.
+      operationId: searchNotes
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: Search query string
+          example: roadmap
+        - $ref: "#/components/parameters/pageParam"
+        - $ref: "#/components/parameters/limitParam"
+      responses:
+        "200":
+          description: Search results with highlighted excerpts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PaginatedSearchResults"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Sharing ───────────────────────────────────────────────
+  /notes/{id}/share:
+    post:
+      tags: [Sharing]
+      summary: Generate a public share link for a note
+      operationId: createShareLink
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/noteIdParam"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateShareLinkRequest"
+      responses:
+        "201":
+          description: Share link created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ShareLink"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /public/{token}:
+    get:
+      tags: [Sharing]
+      summary: Read a shared note (unauthenticated, view count incremented atomically)
+      operationId: getPublicNote
+      parameters:
+        - $ref: "#/components/parameters/shareTokenParam"
+      responses:
+        "200":
+          description: Public note content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PublicNote"
+        "404":
+          description: Token not found, expired, or revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  message: Share link not found or has expired
+                  code: SHARE_LINK_INVALID
+
+  /share/{id}:
+    delete:
+      tags: [Sharing]
+      summary: Revoke a share link
+      operationId: revokeShareLink
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/shareLinkIdParam"
+      responses:
+        "200":
+          description: Share link revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: Share link revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Version History ───────────────────────────────────────
+  /notes/{id}/versions:
+    get:
+      tags: [Versions]
+      summary: List all version snapshots for a note
+      operationId: listVersions
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/noteIdParam"
+        - $ref: "#/components/parameters/pageParam"
+        - $ref: "#/components/parameters/limitParam"
+      responses:
+        "200":
+          description: Version list (newest first)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [items, total, page, limit]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/NoteVersion"
+                      total:
+                        type: integer
+                      page:
+                        type: integer
+                      limit:
+                        type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /notes/{id}/versions/{versionId}:
+    get:
+      tags: [Versions]
+      summary: Get a specific version snapshot
+      operationId: getVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/noteIdParam"
+        - $ref: "#/components/parameters/versionIdParam"
+      responses:
+        "200":
+          description: Version snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/NoteVersion"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /notes/{id}/versions/{versionId}/restore:
+    post:
+      tags: [Versions]
+      summary: Restore a note to a historical version (creates a new snapshot; originals untouched)
+      operationId: restoreVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/noteIdParam"
+        - $ref: "#/components/parameters/versionIdParam"
+      responses:
+        "200":
+          description: Note restored; latest note state returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Note"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
