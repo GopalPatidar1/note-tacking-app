@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { UserPublic } from '../types/user'
 
 const passwordSchema = z
   .string()
@@ -31,3 +32,27 @@ export type RegisterRequestDTO = z.infer<typeof RegisterRequestSchema>
 export type LoginRequestDTO = z.infer<typeof LoginRequestSchema>
 export type LogoutRequestDTO = z.infer<typeof LogoutRequestSchema>
 export type RefreshRequestDTO = z.infer<typeof RefreshRequestSchema>
+
+export const ForgotPasswordRequestSchema = z.object({
+  email: z.string().email(),
+})
+
+export const ResetPasswordRequestSchema = z.object({
+  email: z.string().email(),
+  otp: z.string().min(1),
+  newPassword: passwordSchema,
+})
+
+export type ForgotPasswordRequestDTO = z.infer<typeof ForgotPasswordRequestSchema>
+export type ResetPasswordRequestDTO = z.infer<typeof ResetPasswordRequestSchema>
+
+export interface AuthResponseDTO {
+  accessToken: string
+  refreshToken: string
+  user: UserPublic
+}
+
+export interface RefreshResponseDTO {
+  accessToken: string
+  refreshToken: string
+}
