@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, type IRouter } from 'express'
 import rateLimit from 'express-rate-limit'
 import { authController } from '../controllers/auth.controller'
 
@@ -7,9 +7,10 @@ const authLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
 })
 
-const router = Router()
+const router: IRouter = Router()
 
 router.post('/register', authLimiter, authController.register)
 router.post('/login', authLimiter, authController.login)

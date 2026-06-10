@@ -16,6 +16,8 @@ model User {
   updatedAt    DateTime       @updatedAt
 
   refreshTokens RefreshToken[]
+  notes         Note[]
+  tags          Tag[]
 
   @@map("users")
 }
@@ -30,4 +32,49 @@ model RefreshToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("refresh_tokens")
+}
+
+model Note {
+  id        String    @id @default(uuid())
+  userId    String
+  title     String
+  content   String
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tags     Tag[]         @relation("NoteTags")
+  versions NoteVersion[]
+
+  @@index([userId])
+  @@map("notes")
+}
+
+model Tag {
+  id     String @id @default(uuid())
+  userId String
+  name   String
+  color  String
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notes Note[] @relation("NoteTags")
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("tags")
+}
+
+model NoteVersion {
+  id            String   @id @default(uuid())
+  noteId        String
+  title         String
+  content       String
+  versionNumber Int
+  createdAt     DateTime @default(now())
+
+  note Note @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@index([noteId])
+  @@map("note_versions")
 }
