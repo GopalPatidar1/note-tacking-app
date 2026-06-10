@@ -27,7 +27,9 @@ http.interceptors.response.use(
     const original = error.config
     if (!original) return Promise.reject(error)
 
-    if (error.response?.status === 401 && !original._retry) {
+    const isAuthEndpoint = original.url?.startsWith('/auth/')
+
+    if (error.response?.status === 401 && !original._retry && !isAuthEndpoint) {
       original._retry = true
       const { refreshToken } = useAuthStore.getState()
 
