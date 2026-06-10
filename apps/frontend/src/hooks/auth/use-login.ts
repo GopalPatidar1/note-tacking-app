@@ -18,23 +18,17 @@ export function useLogin() {
       navigate('/notes', { replace: true })
     },
     onError: (error: unknown) => {
-      const message = extractErrorMessage(error)
+      const message = extractLoginErrorMessage(error)
       toast.error(message)
     },
   })
 }
 
-function extractErrorMessage(error: unknown): string {
-  if (
-    error &&
-    typeof error === 'object' &&
-    'response' in error &&
-    error.response &&
-    typeof error.response === 'object' &&
-    'data' in error.response
-  ) {
-    const data = error.response.data as { error?: { message?: string } }
-    return data?.error?.message ?? 'Something went wrong'
+function extractLoginErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = (error as { response?: { status?: number; data?: { error?: { message?: string } } } }).response
+    if (response?.status === 401) return 'Invalid email or password'
+    return response?.data?.error?.message ?? 'Something went wrong'
   }
   return 'Something went wrong'
 }
