@@ -20,7 +20,11 @@ export const ListNotesQuerySchema = z.object({
     'updatedAt_asc', 'updatedAt_desc',
     'title_asc',     'title_desc',
   ]).default('updatedAt_desc'),
-  tagId: z.string().uuid().optional(),
+  tagId:       z.string().uuid().optional(),
+  createdFrom: z.coerce.date().optional(),
+  createdTo:   z.coerce.date().optional(),
+  updatedFrom: z.coerce.date().optional(),
+  updatedTo:   z.coerce.date().optional(),
 })
 
 export type CreateNoteDTO     = z.infer<typeof CreateNoteSchema>

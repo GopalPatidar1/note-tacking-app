@@ -69,10 +69,14 @@ export const noteService = {
   async list(userId: string, query: ListNotesQueryDTO): Promise<PaginatedNotesDTO> {
     const orderBy = (SORT_MAP[query.sort] ?? { updatedAt: 'desc' }) as object
     const { items, total } = await noteRepository.findAll(userId, {
-      page:    query.page,
-      limit:   query.limit,
-      orderBy: orderBy as Parameters<typeof noteRepository.findAll>[1]['orderBy'],
-      tagId:   query.tagId,
+      page:        query.page,
+      limit:       query.limit,
+      orderBy:     orderBy as Parameters<typeof noteRepository.findAll>[1]['orderBy'],
+      tagId:       query.tagId,
+      createdFrom: query.createdFrom,
+      createdTo:   query.createdTo,
+      updatedFrom: query.updatedFrom,
+      updatedTo:   query.updatedTo,
     })
     return { items: items.map(toNoteDTO), total, page: query.page, limit: query.limit }
   },

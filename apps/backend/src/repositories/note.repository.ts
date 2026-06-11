@@ -39,10 +39,14 @@ export const noteRepository = {
   findAll(
     userId: string,
     opts: {
-      page:    number
-      limit:   number
-      orderBy: Prisma.NoteOrderByWithRelationInput
-      tagId?:  string
+      page:         number
+      limit:        number
+      orderBy:      Prisma.NoteOrderByWithRelationInput
+      tagId?:       string
+      createdFrom?: Date
+      createdTo?:   Date
+      updatedFrom?: Date
+      updatedTo?:   Date
     },
   ) {
     const where: Prisma.NoteWhereInput = {
@@ -50,6 +54,22 @@ export const noteRepository = {
       deletedAt: null,
       ...(opts.tagId
         ? { tags: { some: { id: opts.tagId, userId } } }
+        : {}),
+      ...(opts.createdFrom || opts.createdTo
+        ? {
+            createdAt: {
+              ...(opts.createdFrom ? { gte: opts.createdFrom } : {}),
+              ...(opts.createdTo   ? { lte: opts.createdTo }   : {}),
+            },
+          }
+        : {}),
+      ...(opts.updatedFrom || opts.updatedTo
+        ? {
+            updatedAt: {
+              ...(opts.updatedFrom ? { gte: opts.updatedFrom } : {}),
+              ...(opts.updatedTo   ? { lte: opts.updatedTo }   : {}),
+            },
+          }
         : {}),
     }
 

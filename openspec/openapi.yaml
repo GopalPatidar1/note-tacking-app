@@ -489,6 +489,42 @@ components:
       schema:
         type: string
 
+    createdFromParam:
+      in: query
+      name: createdFrom
+      schema:
+        type: string
+        format: date-time
+      description: Return notes created on or after this timestamp (ISO 8601)
+      example: "2024-01-01T00:00:00Z"
+
+    createdToParam:
+      in: query
+      name: createdTo
+      schema:
+        type: string
+        format: date-time
+      description: Return notes created on or before this timestamp (ISO 8601)
+      example: "2024-12-31T23:59:59Z"
+
+    updatedFromParam:
+      in: query
+      name: updatedFrom
+      schema:
+        type: string
+        format: date-time
+      description: Return notes updated on or after this timestamp (ISO 8601)
+      example: "2024-06-01T00:00:00Z"
+
+    updatedToParam:
+      in: query
+      name: updatedTo
+      schema:
+        type: string
+        format: date-time
+      description: Return notes updated on or before this timestamp (ISO 8601)
+      example: "2024-06-30T23:59:59Z"
+
   # ───────────────────────────────────────────────────────────
   # Reusable responses
   # ───────────────────────────────────────────────────────────
@@ -761,6 +797,10 @@ paths:
             type: string
             format: uuid
           description: Filter by tag
+        - $ref: "#/components/parameters/createdFromParam"
+        - $ref: "#/components/parameters/createdToParam"
+        - $ref: "#/components/parameters/updatedFromParam"
+        - $ref: "#/components/parameters/updatedToParam"
       responses:
         "200":
           description: Paginated note list
@@ -771,6 +811,8 @@ paths:
                 properties:
                   data:
                     $ref: "#/components/schemas/PaginatedNotes"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
 

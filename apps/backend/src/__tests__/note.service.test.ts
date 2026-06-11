@@ -123,6 +123,91 @@ describe('noteService.list', () => {
     expect(result.page).toBe(1)
     expect(result.limit).toBe(20)
   })
+
+  it('U04b: default query — findAll called with page=1, limit=20, updatedAt_desc orderBy', async () => {
+    vi.mocked(noteRepository.findAll).mockResolvedValue({ items: [], total: 0 })
+
+    await noteService.list('user-1', { page: 1, limit: 20, sort: 'updatedAt_desc' })
+
+    expect(noteRepository.findAll).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      page:    1,
+      limit:   20,
+      orderBy: { updatedAt: 'desc' },
+    }))
+  })
+
+  it('U04c: custom page=2 limit=5 — passed through to findAll', async () => {
+    vi.mocked(noteRepository.findAll).mockResolvedValue({ items: [], total: 0 })
+
+    await noteService.list('user-1', { page: 2, limit: 5, sort: 'updatedAt_desc' })
+
+    expect(noteRepository.findAll).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      page: 2, limit: 5,
+    }))
+  })
+
+  it('U04d: sort=title_asc — mapped to { title: "asc" }', async () => {
+    vi.mocked(noteRepository.findAll).mockResolvedValue({ items: [], total: 0 })
+
+    await noteService.list('user-1', { page: 1, limit: 20, sort: 'title_asc' })
+
+    expect(noteRepository.findAll).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      orderBy: { title: 'asc' },
+    }))
+  })
+
+  it('U04e: tagId — passed through to findAll', async () => {
+    vi.mocked(noteRepository.findAll).mockResolvedValue({ items: [], total: 0 })
+
+    await noteService.list('user-1', { page: 1, limit: 20, sort: 'updatedAt_desc', tagId: 'tag-uuid' })
+
+    expect(noteRepository.findAll).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      tagId: 'tag-uuid',
+    }))
+  })
+
+  it('U04f: createdFrom + createdTo — both Date objects passed to findAll', async () => {
+    vi.mocked(noteRepository.findAll).mockResolvedValue({ items: [], total: 0 })
+    const from = new Date('2024-01-01')
+    const to   = new Date('2024-12-31')
+
+    await noteService.list('user-1', { page: 1, limit: 20, sort: 'updatedAt_desc', createdFrom: from, createdTo: to })
+
+    expect(noteRepository.findAll).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      createdFrom: from,
+      createdTo:   to,
+    }))
+  })
+
+  it('U04g: updatedFrom only — passed through; updatedTo is undefined', async () => {
+    vi.mocked(noteRepository.findAll).mockResolvedValue({ items: [], total: 0 })
+    const from = new Date('2024-06-01')
+
+    await noteService.list('user-1', { page: 1, limit: 20, sort: 'updatedAt_desc', updatedFrom: from })
+
+    const call = vi.mocked(noteRepository.findAll).mock.calls[0][1]
+    expect(call.updatedFrom).toEqual(from)
+    expect(call.updatedTo).toBeUndefined()
+  })
+
+  it('U04h: all four date params — all passed through to findAll simultaneously', async () => {
+    vi.mocked(noteRepository.findAll).mockResolvedValue({ items: [], total: 0 })
+    const cFrom = new Date('2024-01-01')
+    const cTo   = new Date('2024-06-30')
+    const uFrom = new Date('2024-03-01')
+    const uTo   = new Date('2024-09-30')
+
+    await noteService.list('user-1', {
+      page: 1, limit: 20, sort: 'updatedAt_desc',
+      createdFrom: cFrom, createdTo: cTo,
+      updatedFrom: uFrom, updatedTo: uTo,
+    })
+
+    expect(noteRepository.findAll).toHaveBeenCalledWith('user-1', expect.objectContaining({
+      createdFrom: cFrom, createdTo: cTo,
+      updatedFrom: uFrom, updatedTo: uTo,
+    }))
+  })
 })
 
 // ─── U05 / U06 — getById ──────────────────────────────────────────────────────

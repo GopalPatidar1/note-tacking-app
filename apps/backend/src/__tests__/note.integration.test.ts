@@ -122,6 +122,42 @@ describe('GET /api/notes', () => {
     expect(res.body.data.limit).toBe(2)
   })
 
+  skipIfNoDb('I05b: page=2&limit=2 returns correct second page', async () => {
+    const token = await registerAndLogin()
+    for (let i = 1; i <= 3; i++) {
+      await request.post('/api/notes').set('Authorization', `Bearer ${token}`).send({ title: `Note ${i}`, content: 'C' })
+    }
+
+    const res = await request.get('/api/notes?page=2&limit=2').set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.items).toHaveLength(1)
+    expect(res.body.data.page).toBe(2)
+  })
+
+  skipIfNoDb('I05c: limit=200 — 400 validation error', async () => {
+    const token = await registerAndLogin()
+
+    const res = await request.get('/api/notes?limit=200').set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  skipIfNoDb('I05d: tagId from another user — returns empty (IDOR guard)', async () => {
+    const tokenA = await registerAndLogin('alice@example.com')
+    await registerAndLogin('bob@example.com')
+    const userB  = await prisma.user.findUnique({ where: { email: 'bob@example.com' } })
+    const bobTag = await prisma.tag.create({ data: { userId: userB!.id, name: 'BobTag', color: '#000000' } })
+
+    await request.post('/api/notes').set('Authorization', `Bearer ${tokenA}`).send({ title: 'Alice Note', content: 'C' })
+
+    const res = await request.get(`/api/notes?tagId=${bobTag.id}`).set('Authorization', `Bearer ${tokenA}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.items).toHaveLength(0)
+  })
+
   skipIfNoDb('I06: tagId filter returns only tagged notes', async () => {
     const token = await registerAndLogin()
     const user  = await prisma.user.findUnique({ where: { email: 'alice@example.com' } })
@@ -255,5 +291,111 @@ describe('DELETE /api/notes/:id', () => {
 
     expect(res.status).toBe(200)
     expect(res.body.data.items).toHaveLength(0)
+  })
+})
+
+// ─── I17–I23: GET /api/notes — date range filters ────────────────────────────
+describe('GET /api/notes — date filters', () => {
+  skipIfNoDb('I17: createdFrom — only notes created on or after the timestamp', async () => {
+    const token = await registerAndLogin()
+    const user  = await prisma.user.findUnique({ where: { email: 'alice@example.com' } })
+
+    await prisma.note.create({ data: { userId: user!.id, title: 'Old', content: 'C', createdAt: new Date('2020-01-01') } })
+    await prisma.note.create({ data: { userId: user!.id, title: 'New', content: 'C', createdAt: new Date('2024-01-01') } })
+
+    const res = await request
+      .get('/api/notes?createdFrom=2022-01-01T00:00:00Z')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.items).toHaveLength(1)
+    expect(res.body.data.items[0].title).toBe('New')
+  })
+
+  skipIfNoDb('I18: createdTo — only notes created on or before the timestamp', async () => {
+    const token = await registerAndLogin()
+    const user  = await prisma.user.findUnique({ where: { email: 'alice@example.com' } })
+
+    await prisma.note.create({ data: { userId: user!.id, title: 'Early', content: 'C', createdAt: new Date('2020-01-01') } })
+    await prisma.note.create({ data: { userId: user!.id, title: 'Late',  content: 'C', createdAt: new Date('2024-01-01') } })
+
+    const res = await request
+      .get('/api/notes?createdTo=2022-01-01T00:00:00Z')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.items).toHaveLength(1)
+    expect(res.body.data.items[0].title).toBe('Early')
+  })
+
+  skipIfNoDb('I19: createdFrom + createdTo range — notes within the window are returned', async () => {
+    const token = await registerAndLogin()
+
+    await request.post('/api/notes').set('Authorization', `Bearer ${token}`).send({ title: 'InRange', content: 'C' })
+
+    const from = new Date(Date.now() - 60_000).toISOString()
+    const to   = new Date(Date.now() + 60_000).toISOString()
+
+    const res = await request
+      .get(`/api/notes?createdFrom=${from}&createdTo=${to}`)
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.items.length).toBeGreaterThan(0)
+  })
+
+  skipIfNoDb('I20: updatedFrom + updatedTo range — notes updated within the window are returned', async () => {
+    const token   = await registerAndLogin()
+    const created = await request.post('/api/notes').set('Authorization', `Bearer ${token}`).send({ title: 'Upd', content: 'C' })
+    const noteId  = created.body.data.id
+    await request.patch(`/api/notes/${noteId}`).set('Authorization', `Bearer ${token}`).send({ title: 'Upd2' })
+
+    const from = new Date(Date.now() - 60_000).toISOString()
+    const to   = new Date(Date.now() + 60_000).toISOString()
+
+    const res = await request
+      .get(`/api/notes?updatedFrom=${from}&updatedTo=${to}`)
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.items.length).toBeGreaterThan(0)
+  })
+
+  skipIfNoDb('I21: createdFrom in the far future — items=[], total=0', async () => {
+    const token = await registerAndLogin()
+    await request.post('/api/notes').set('Authorization', `Bearer ${token}`).send({ title: 'T', content: 'C' })
+
+    const future = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString()
+
+    const res = await request
+      .get(`/api/notes?createdFrom=${future}`)
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.items).toHaveLength(0)
+    expect(res.body.data.total).toBe(0)
+  })
+
+  skipIfNoDb('I22: inverted range (createdFrom > createdTo) — 200 with empty items, not 400', async () => {
+    const token = await registerAndLogin()
+    await request.post('/api/notes').set('Authorization', `Bearer ${token}`).send({ title: 'T', content: 'C' })
+
+    const res = await request
+      .get('/api/notes?createdFrom=2024-12-31T00:00:00Z&createdTo=2024-01-01T00:00:00Z')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.items).toHaveLength(0)
+  })
+
+  skipIfNoDb('I23: invalid date string — 400 validation error', async () => {
+    const token = await registerAndLogin()
+
+    const res = await request
+      .get('/api/notes?createdFrom=not-a-date')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_ERROR')
   })
 })
