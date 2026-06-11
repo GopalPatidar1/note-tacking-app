@@ -7,6 +7,7 @@ import { ForgotPasswordPage } from '@/pages/auth/forgot-password.page'
 import { ResetPasswordPage } from '@/pages/auth/reset-password.page'
 import { NotesListPage } from '@/pages/notes/notes-list.page'
 import { NoteEditorPage } from '@/pages/notes/note-editor.page'
+import { SearchPage } from '@/pages/notes/search.page'
 
 export const router = createBrowserRouter([
   {
@@ -24,6 +25,7 @@ export const router = createBrowserRouter([
       { path: '/notes',     element: <NotesListPage /> },
       { path: '/notes/new', element: <NoteEditorPage /> },
       { path: '/notes/:id', element: <NoteEditorPage /> },
+      { path: '/search',    element: <SearchPage /> },
     ],
   },
   { path: '/', element: <Navigate to="/notes" replace /> },
