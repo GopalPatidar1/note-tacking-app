@@ -1,5 +1,6 @@
 export * from './schemas/auth'
 export * from './schemas/notes'
+export * from './schemas/tags'
 export * from './constants/auth'
 export * from './constants/notes'
 export * from './types/user'

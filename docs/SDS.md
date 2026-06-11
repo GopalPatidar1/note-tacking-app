@@ -341,7 +341,8 @@ AB-1004 → Notes CRUD
 
 AB-1005 → Pagination & Filters
 
-AB-1006 → Tags
+AB-1006
+ → Tags
 
 AB-1007 → Search
 
