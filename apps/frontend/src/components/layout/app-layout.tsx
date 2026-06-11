@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import { Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/stores/auth.store'
 import { useLogout } from '@/hooks/auth/use-logout'
@@ -16,6 +18,13 @@ export function AppLayout({ sidebar, children }: AppLayoutProps) {
     <div className="flex h-screen flex-col">
       <header className="flex shrink-0 items-center justify-between border-b px-6 py-3">
         <span className="font-semibold">NoteApp</span>
+        <Link
+          to="/search"
+          className="text-muted-foreground transition-colors hover:text-foreground"
+          aria-label="Search notes"
+        >
+          <Search className="h-5 w-5" />
+        </Link>
         <div className="flex items-center gap-3">
           {user && (
             <span className="text-sm text-muted-foreground">{user.name}</span>

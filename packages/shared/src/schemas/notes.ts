@@ -52,3 +52,30 @@ export interface PaginatedNotesDTO {
   page:  number
   limit: number
 }
+
+// ── search ──────────────────────────────────────────────────────
+
+export const SearchQuerySchema = z.object({
+  q:     z.string().min(1),
+  page:  z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+})
+
+export type SearchQueryDTO = z.infer<typeof SearchQuerySchema>
+
+export interface SearchResultDTO {
+  id:        string
+  title:     string
+  headline:  string
+  tags:      Pick<TagDTO, 'name' | 'color'>[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PaginatedSearchResultsDTO {
+  items:  SearchResultDTO[]
+  total:  number
+  page:   number
+  limit:  number
+  query:  string
+}
