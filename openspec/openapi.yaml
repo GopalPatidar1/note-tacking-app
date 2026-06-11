@@ -173,7 +173,7 @@ components:
     # ── tags ────────────────────────────────────────────────
     Tag:
       type: object
-      required: [id, userId, name, color]
+      required: [id, userId, name, color, noteCount, createdAt]
       properties:
         id:
           type: string
@@ -191,6 +191,9 @@ components:
           type: integer
           description: Total non-deleted notes attached to this tag
           example: 5
+        createdAt:
+          type: string
+          format: date-time
 
     CreateTagRequest:
       type: object
@@ -202,6 +205,7 @@ components:
           example: Work
         color:
           type: string
+          pattern: '^#([0-9A-Fa-f]{3}){1,2}$'
           example: "#3B82F6"
 
     UpdateTagRequest:
@@ -214,6 +218,7 @@ components:
           example: Personal
         color:
           type: string
+          pattern: '^#([0-9A-Fa-f]{3}){1,2}$'
           example: "#10B981"
 
     # ── notes ───────────────────────────────────────────────
@@ -894,6 +899,7 @@ paths:
     get:
       tags: [Tags]
       summary: List all tags for the authenticated user (with note counts)
+      description: Ordered by createdAt DESC (newest first).
       operationId: listTags
       security:
         - bearerAuth: []
@@ -968,8 +974,6 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -997,8 +1001,6 @@ paths:
                         example: Tag deleted
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
