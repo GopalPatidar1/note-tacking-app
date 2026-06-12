@@ -62,8 +62,7 @@ describe('SearchResultCard', () => {
   // Scenario G — click navigates to editor
   it('navigates to /notes/:id when card is clicked', async () => {
     renderCard()
-    const card = screen.getByText('Meeting notes').closest('[class*="cursor-pointer"]') as HTMLElement
-    await userEvent.click(card)
+    await userEvent.click(screen.getByText('Meeting notes'))
     expect(mockNavigate).toHaveBeenCalledWith('/notes/note-1')
   })
 })

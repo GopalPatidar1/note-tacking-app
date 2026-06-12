@@ -106,14 +106,16 @@ export function SearchPage() {
                     <SearchResultCard key={result.id} result={result} />
                   ))}
                 </div>
-                <div className="mt-8">
-                  <NotesPagination
-                    page={data.page}
-                    total={data.total}
-                    limit={data.limit}
-                    onPageChange={handlePageChange}
-                  />
-                </div>
+                {data.total > data.limit && (
+                  <div className="mt-8">
+                    <NotesPagination
+                      page={data.page}
+                      total={data.total}
+                      limit={data.limit}
+                      onPageChange={handlePageChange}
+                    />
+                  </div>
+                )}
               </>
             )}
           </>
