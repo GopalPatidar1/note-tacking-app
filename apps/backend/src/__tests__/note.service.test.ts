@@ -16,6 +16,7 @@ vi.mock('../repositories/note-version.repository', () => ({
   noteVersionRepository: {
     getNextVersionNumber: vi.fn(),
     create:              vi.fn(),
+    deleteExcess:        vi.fn(),
   },
 }))
 
@@ -200,5 +201,40 @@ describe('noteService.delete', () => {
     vi.mocked(noteRepository.findByIdIncludingDeleted).mockResolvedValue(null)
 
     await expect(noteService.delete('user-1', 'note-x')).rejects.toThrow(NotFoundError)
+  })
+})
+
+// ─── auto-purge ───────────────────────────────────────────────────────────────
+describe('noteService — auto-purge after save', () => {
+  it('U13: calls deleteExcess after create', async () => {
+    const note = makeNote()
+    vi.mocked(prisma.tag.count).mockResolvedValue(0)
+    vi.mocked(prisma.$transaction).mockImplementation(async (fn) => {
+      vi.mocked(noteRepository.create).mockResolvedValue(note)
+      vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(1)
+      vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion())
+      return fn({} as never)
+    })
+    vi.mocked(noteVersionRepository.deleteExcess).mockResolvedValue()
+
+    await noteService.create('user-1', { title: 'T', content: 'C', tagIds: [] })
+
+    expect(noteVersionRepository.deleteExcess).toHaveBeenCalledWith('note-1', 50)
+  })
+
+  it('U14: calls deleteExcess after update', async () => {
+    const note = makeNote({ title: 'Updated' })
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
+    vi.mocked(prisma.$transaction).mockImplementation(async (fn) => {
+      vi.mocked(noteRepository.update).mockResolvedValue(note)
+      vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
+      vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
+      return fn({} as never)
+    })
+    vi.mocked(noteVersionRepository.deleteExcess).mockResolvedValue()
+
+    await noteService.update('user-1', 'note-1', { title: 'Updated' })
+
+    expect(noteVersionRepository.deleteExcess).toHaveBeenCalledWith('note-1', 50)
   })
 })

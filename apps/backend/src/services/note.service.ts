@@ -7,6 +7,7 @@ import type {
   TagDTO,
   PaginatedNotesDTO,
 } from '@note-app/shared'
+import { MAX_VERSIONS_PER_NOTE } from '@note-app/shared'
 import { prisma } from '../lib/prisma'
 import { noteRepository } from '../repositories/note.repository'
 import { noteVersionRepository } from '../repositories/note-version.repository'
@@ -63,6 +64,7 @@ export const noteService = {
       return created
     })
 
+    await noteVersionRepository.deleteExcess(note.id, MAX_VERSIONS_PER_NOTE)
     return toNoteDTO(note)
   },
 
@@ -101,6 +103,7 @@ export const noteService = {
       return updated
     })
 
+    await noteVersionRepository.deleteExcess(noteId, MAX_VERSIONS_PER_NOTE)
     return toNoteDTO(note)
   },
 

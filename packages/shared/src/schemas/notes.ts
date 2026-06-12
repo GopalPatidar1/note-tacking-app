@@ -53,6 +53,30 @@ export interface PaginatedNotesDTO {
   limit: number
 }
 
+// ── versions ────────────────────────────────────────────────────
+
+export const ListVersionsQuerySchema = z.object({
+  page:  z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+})
+export type ListVersionsQueryDTO = z.infer<typeof ListVersionsQuerySchema>
+
+export interface NoteVersionDTO {
+  id:            string
+  noteId:        string
+  title:         string
+  content:       string
+  versionNumber: number
+  createdAt:     string
+}
+
+export interface PaginatedVersionsDTO {
+  items: NoteVersionDTO[]
+  total: number
+  page:  number
+  limit: number
+}
+
 // ── search ──────────────────────────────────────────────────────
 
 export const SearchQuerySchema = z.object({
