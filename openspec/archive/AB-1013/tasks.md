@@ -1,7 +1,7 @@
 # Task Checklist — AB-1013: Frontend Search UI with Highlights
 
-**Branch:** `feat/AB-1013-frontend-search-ui`  
-**Plan:** `openspec/changes/AB-1013/plan.md`  
+**Branch:** `feat/AB-1013-search-ui-highlights`
+**Plan:** `openspec/changes/AB-1013/plan.md`
 **Status:** AWAITING APPROVAL
 
 ---
@@ -11,39 +11,40 @@
 > Unblocks all frontend work. No DB migrations needed — search index exists from AB-1004.
 
 - [ ] **T-01** Add search types to `packages/shared/src/schemas/notes.ts`
-  - Append `SearchQuerySchema` (Zod, `q` min 1, `page`, `limit`)
-  - Append `SearchQueryDTO` (inferred from schema)
-  - Append `SearchResultDTO` interface (`id`, `title`, `headline`, `tags: Pick<TagDTO,'name'|'color'>[]`, `createdAt`, `updatedAt`)
-  - Append `PaginatedSearchResultsDTO` interface (`items`, `total`, `page`, `limit`, `query`)
-  - No changes needed to `packages/shared/src/index.ts` (already re-exports `./schemas/notes`)
+  - Append `SearchQuerySchema` — Zod: `q` (min 1), `page` (coerce int, default 1), `limit` (coerce int, max 100, default 20)
+  - Append `SearchQueryDTO` — inferred from schema via `z.infer<typeof SearchQuerySchema>`
+  - Append `SearchResultDTO` interface — `{ id, title, headline, tags: Pick<TagDTO,'name'|'color'>[], createdAt, updatedAt }`
+  - Append `PaginatedSearchResultsDTO` interface — `{ items, total, page, limit, query }`
+  - `packages/shared/src/index.ts` already re-exports `./schemas/notes` — no change needed
 
 ### Phase 1 Checkpoint
 
 ```bash
-pnpm tsc --noEmit          # must pass with 0 errors
-pnpm --filter frontend lint # must pass with 0 warnings
+pnpm tsc --noEmit           # 0 type errors
+pnpm --filter frontend lint  # 0 warnings
 ```
 
 ---
 
 ## Phase 2 — Core Implementation
 
-> T-02 and T-03 depend only on T-01 and are **PARALLEL** — implement in either order or simultaneously.
+> T-02 and T-03 depend only on T-01. They are **PARALLEL** — implement in either order.
 
 - [ ] **T-02** `[PARALLEL]` Create `apps/frontend/src/hooks/notes/use-search.ts`
-  - `useSearch(params: SearchQueryDTO)` using `useQuery`
-  - `queryKey: ['search', params]`
-  - `queryFn`: `GET /search` via `http`, returns `PaginatedSearchResultsDTO`
-  - `enabled: params.q.length >= 2`
-  - No `retry` override (inherits global `retry: false`)
+  - `export function useSearch(params: SearchQueryDTO)` using `useQuery`
+  - `queryKey: ['search', params]` — unique cache entry per `{ q, page, limit }` triple
+  - `queryFn`: `http.get<{ data: PaginatedSearchResultsDTO }>('/search', { params }).then(r => r.data.data)`
+  - `enabled: params.q.length >= 2` — frontend 2-char guard; prevents noisy 1-char results
+  - No `retry` override — inherits global `retry: false`
+  - No `staleTime` override — always refetches on mount so results reflect latest note edits
 
 - [ ] **T-03** `[PARALLEL]` Create `apps/frontend/src/components/notes/search-result-card.tsx`
   - Props: `result: SearchResultDTO`
-  - Render title (`h3`, truncated), headline (`dangerouslySetInnerHTML`), tags (colored pills), date (`Intl.DateTimeFormat`)
-  - Tailwind: `[&_b]:font-semibold [&_b]:text-foreground` to style `<b>` highlight tags
-  - `line-clamp-3` on headline paragraph
-  - Entire `<Card>` clickable → `navigate('/notes/${result.id}')`
-  - `key={tag.name}` on tag pills (no `id` in `Pick<TagDTO,'name'|'color'>`)
+  - Render `<h3>` title (truncated), `<p>` headline via `dangerouslySetInnerHTML={{ __html: result.headline }}`
+  - Tailwind on headline: `[&_b]:font-semibold [&_b]:text-foreground` — styles PostgreSQL `<b>` tags; `line-clamp-3`
+  - Tags rendered as colored pills: `key={tag.name}` (no `id` in `Pick<TagDTO,'name'|'color'>`)
+  - Date via `Intl.DateTimeFormat('en-US', { month:'short', day:'numeric', year:'numeric' })`
+  - Entire `<Card>` is clickable — `onClick={() => navigate('/notes/${result.id}')}`
 
 ### Phase 2 Checkpoint
 
@@ -56,31 +57,40 @@ pnpm --filter frontend lint
 
 ## Phase 3 — Integration
 
-> T-04, T-05, T-06 can all be done in parallel; T-04 depends on T-02 + T-03 being compilable.
+> T-04 depends on T-02 + T-03. T-05 and T-06 are independent and can run in parallel with T-04.
 
-- [ ] **T-04** `[PARALLEL]` Create `apps/frontend/src/pages/notes/search.page.tsx`
-  - Local state: `inputValue` (controlled input, live)
-  - URL state: `q`, `page` from `useSearchParams`
-  - `useEffect` sync: when URL `q` changes externally (back/forward), update `inputValue`
+- [ ] **T-04** `[PARALLEL with T-05, T-06]` Create `apps/frontend/src/pages/notes/search.page.tsx`
+  - Local state: `inputValue` (controlled `<Input>`, live-updated on every keystroke)
+  - URL state: `q`, `page` from `useSearchParams` — single source of truth for the committed search
+  - `useEffect` sync: when URL `q` changes externally (back/forward nav), update `inputValue`
   - `useEffect` debounce: 400ms timeout on `inputValue` changes
-    - If `inputValue.length < 2`: clear `q` and `page` params with `replace: true`
+    - Skip if `inputValue === q` — avoids spurious timer on initial render
+    - If `inputValue.length < 2`: delete `q` and `page` from params with `replace: true`
     - Otherwise: `setSearchParams({ q: inputValue, page: '1' }, { replace: true })`
-  - `useSearch({ q, page, limit: DEFAULT_LIMIT })` — `enabled` guard lives in hook
-  - Render four mutually exclusive states:
-    - **Idle** (`q.length < 2 && !isLoading`): "Type at least 2 characters to search."
-    - **Loading** (`isLoading && q.length >= 2`): 3× skeleton rows (`h-28 animate-pulse`)
-    - **Error** (`isError`): "Search failed. Please try again."
-    - **Results** (`data`): result count, `SearchResultCard` list, `NotesPagination`
-    - **Empty** (sub-state of results, `data.items.length === 0`): "No notes found for «query»."
-  - `handlePageChange`: `setSearchParams({ q, page: String(p) })` — no `replace`, adds history entry
-  - Pagination uses `data.page / data.total / data.limit` (not raw URL params)
-  - Wrapped in `<AppLayout>` with no sidebar prop (full-width layout)
+  - `useSearch({ q, page, limit: DEFAULT_LIMIT })` — enabled guard lives in hook, not page
+  - `handlePageChange(p)`: `setSearchParams({ q, page: String(p) })` — no `replace`, adds history entry
+  - Pagination reads `data.page / data.total / data.limit` from response (not raw URL params)
+  - Wrapped in `<AppLayout>` with no `sidebar` prop — full-width layout
+  - **Five render states (mutually exclusive):**
+
+    | State | Condition | UI |
+    |-------|-----------|-----|
+    | Idle | `q.length < 2 && !isLoading` | "Type at least 2 characters to search." |
+    | Loading | `isLoading && q.length >= 2` | 3× `h-28 animate-pulse rounded-lg border bg-muted` |
+    | Error | `isError` | "Search failed. Please try again." (`text-destructive`) |
+    | Results | `data && items.length > 0` | result count + `SearchResultCard` list + `NotesPagination` |
+    | Empty | `data && items.length === 0` | "No notes found for «query»." |
 
 - [ ] **T-05** `[PARALLEL]` Modify `apps/frontend/src/components/layout/app-layout.tsx`
   - Add `import { Link } from 'react-router-dom'`
   - Add `import { Search } from 'lucide-react'`
-  - Insert `<Link to="/search" aria-label="Search notes">` with `<Search className="h-5 w-5" />` between the `NoteApp` logo span and the user/logout `<div>`
-  - No prop changes to `AppLayoutProps`
+  - Insert between logo `<span>` and user/logout `<div>`:
+    ```tsx
+    <Link to="/search" className="text-muted-foreground transition-colors hover:text-foreground" aria-label="Search notes">
+      <Search className="h-5 w-5" />
+    </Link>
+    ```
+  - `AppLayoutProps` unchanged — `{ sidebar?: ReactNode, children: ReactNode }`
 
 - [ ] **T-06** `[PARALLEL]` Modify `apps/frontend/src/router.tsx`
   - Add `import { SearchPage } from '@/pages/notes/search.page'`
@@ -91,80 +101,100 @@ pnpm --filter frontend lint
 ```bash
 pnpm tsc --noEmit
 pnpm --filter frontend lint
-pnpm --filter frontend build   # catches missing imports and unused vars
+pnpm --filter frontend build   # catches missing imports and unused exports
 ```
 
 ---
 
 ## Phase 4 — Tests
 
-> One test file per testable unit. All test scenarios map directly to FRS acceptance criteria.
+> One test file per new unit. All scenarios map to FRS FR-4 acceptance criteria.
+> Test files live in `apps/frontend/src/__tests__/notes/`.
 
-- [ ] **T-07** Create `apps/frontend/src/hooks/notes/use-search.test.ts`
+- [ ] **T-07** Create `__tests__/notes/use-search.test.ts`
 
-  **Scenario A — enabled guard:**
-  - Given `q = 'a'` (length 1), assert `useSearch` does NOT call `GET /search`
+  Setup: `vi.mock('@/lib/http', () => ({ http: { get: vi.fn() } }))`, `renderHook` with `QueryClientProvider` wrapper (`retry: false`).
 
-  **Scenario B — fires when q >= 2:**
-  - Given `q = 'ro'` (length 2), assert `GET /search?q=ro&page=1&limit=20` is called
+  **Scenario A — enabled guard (q empty):**
+  - `useSearch({ q: '', page: 1, limit: 20 })` → assert `http.get` NOT called
+
+  **Scenario A2 — enabled guard (q = 1 char):**
+  - `useSearch({ q: 'a', page: 1, limit: 20 })` → assert `http.get` NOT called
+
+  **Scenario B — fires when q ≥ 2:**
+  - `useSearch({ q: 'ro', page: 1, limit: 20 })` with mocked response
+  - `waitFor(() => http.get called once)`, assert params `{ q: 'ro', page: 1, limit: 20 }`
 
   **Scenario C — returns paginated data:**
-  - Mock `http.get` to return a `PaginatedSearchResultsDTO`
-  - Assert hook resolves with `data.items`, `data.total`, `data.query`
+  - Mock returns `PaginatedSearchResultsDTO`
+  - Assert `result.current.data` equals mock; `data.items.length === 1`; `data.query === 'roadmap'`
 
   **Scenario D — unique cache keys:**
-  - Different `q` values produce different `queryKey` entries
+  - Two hooks with `q: 'foo'` and `q: 'bar'` in separate wrappers
+  - Assert `http.get` called with `q: 'foo'` AND with `q: 'bar'`
 
-- [ ] **T-08** Create `apps/frontend/src/components/notes/search-result-card.test.tsx`
+- [ ] **T-08** Create `__tests__/notes/search-result-card.test.tsx`
 
-  **Scenario E — renders result fields:**
-  - Render `<SearchResultCard>` with a mock `SearchResultDTO`
-  - Assert title text is visible
-  - Assert headline HTML is rendered (tag names appear in DOM)
-  - Assert tag pill text and date string are visible
+  Setup: `vi.mock('react-router-dom', async () => ({ ...actual, useNavigate: () => mockNavigate }))`, `MemoryRouter`, `userEvent`.
 
-  **Scenario F — highlights are rendered:**
-  - Mock `headline = 'Discussed <b>roadmap</b> with team'`
-  - Assert `<b>` tag is present in the DOM (not stripped)
+  **Scenario E — renders all result fields:**
+  - Assert title `'Meeting notes'` visible
+  - Assert tag pill `'Work'` visible
+  - Assert formatted date `'Jun 10, 2026'` visible
+
+  **Scenario F — ts_headline highlights preserved in DOM:**
+  - `headline = 'Discussed <b>roadmap</b> with the team'`
+  - Assert `container.querySelector('b')` is not null
+  - Assert `bold.textContent === 'roadmap'`
+  - Assert surrounding text (`/Discussed/`, `/with the team/`) visible
 
   **Scenario G — click navigates to editor:**
-  - Click the card
-  - Assert `navigate('/notes/<id>')` was called
+  - `userEvent.click` on the card
+  - Assert `mockNavigate` called with `'/notes/note-1'`
 
-- [ ] **T-09** Create `apps/frontend/src/pages/notes/search.page.test.tsx`
+- [ ] **T-09** Create `__tests__/notes/search.page.test.tsx`
 
-  **Scenario H — idle state:**
-  - Render `<SearchPage>` with empty URL (`q=''`)
-  - Assert "Type at least 2 characters" prompt is visible
-  - Assert no API call made
+  Setup: `vi.mock('@/lib/http')`, mock `useLogout` + `useAuthStore`, `QueryClientProvider` + `MemoryRouter` with `/search` and `/notes/:id` routes.
 
-  **Scenario I — debounce fires after 400ms:**
-  - Use `vi.useFakeTimers`
-  - Type "ro" into input
-  - Assert no API call immediately
-  - Advance timers by 400ms
-  - Assert URL param `q=ro` is set
+  **Scenario H — idle state (no query):**
+  - `renderPage('/search')` → assert "Type at least 2 characters" visible; `http.get` not called
+
+  **Scenario H2 — idle state (q = 1 char):**
+  - `renderPage('/search?q=a')` → assert "Type at least 2 characters" visible
+
+  **Scenario I — debounce: no immediate API call:**
+  - `vi.useFakeTimers()`
+  - `fireEvent.change(input, { target: { value: 'ro' } })`
+  - Assert `http.get` NOT called immediately
+
+  **Scenario I2 — debounce: fires after 400ms:**
+  - `act(() => vi.advanceTimersByTimeAsync(400))`
+  - Assert `http.get` called with `params: { q: 'roadmap', ... }`
 
   **Scenario J — loading state:**
-  - Mock `useSearch` to return `isLoading: true`
-  - Assert skeleton rows are rendered (3× `animate-pulse` divs)
+  - `http.get` returns a never-resolving promise
+  - `renderPage('/search?q=roadmap')` → assert 3× `.animate-pulse` in DOM
 
   **Scenario K — results rendered:**
-  - Mock `useSearch` to return data with 2 items
-  - Assert result count text shows "2 results for …"
-  - Assert 2 `SearchResultCard` components are rendered
+  - Mock returns `{ total: 2, items: [...2 items...], query: 'roadmap' }`
+  - Assert `'2 results for'` visible; both card titles visible
+
+  **Scenario K2 — singular "result":**
+  - `total: 1` → assert `'1 result for'` (no plural 's')
 
   **Scenario L — empty state:**
-  - Mock `useSearch` to return `{ items: [], total: 0, query: 'xyz' }`
-  - Assert "No notes found for «xyz»" is visible
+  - `items: [], total: 0, query: 'roadmap'`
+  - Assert `'No notes found for'` visible
 
   **Scenario M — error state:**
-  - Mock `useSearch` to return `isError: true`
-  - Assert "Search failed" error message is visible
+  - `http.get.mockRejectedValue(new Error('Network error'))`
+  - Assert `'Search failed'` visible
 
-  **Scenario N — pagination (FR-4 pagination requirement):**
-  - Mock data with `total: 40, limit: 20, page: 1`
-  - Assert `NotesPagination` is rendered with correct props
+  **Scenario N — pagination shown when total > limit:**
+  - `total: 40, limit: 20` → assert Next/Prev buttons present
+
+  **Scenario N2 — pagination hidden when all fit on one page:**
+  - `total: 2, limit: 20` → assert Next/Prev buttons absent
 
 ### Phase 4 Checkpoint
 
@@ -179,13 +209,13 @@ pnpm --filter frontend build   # final build clean
 
 ## Completion Criteria
 
-All tasks checked off AND all four gates passing:
+All tasks checked off **and** all four gates passing:
 
 ```bash
-pnpm tsc --noEmit                      # 0 type errors
-pnpm --filter frontend lint            # 0 warnings
-pnpm --filter frontend test            # all T-07 / T-08 / T-09 scenarios green
-pnpm --filter frontend build           # 0 build errors
+pnpm tsc --noEmit                # 0 type errors
+pnpm --filter frontend lint      # 0 warnings
+pnpm --filter frontend test      # all T-07/T-08/T-09 scenarios green
+pnpm --filter frontend build     # 0 build errors
 ```
 
 ---
@@ -194,13 +224,13 @@ pnpm --filter frontend build           # 0 build errors
 
 ```
 T-01 (shared types)
-  ├── T-02 (use-search hook)    ──┐
-  └── T-03 (SearchResultCard)  ──┤
-                                 └── T-04 (SearchPage)
-                                       └── T-06 (router)
+  ├── T-02 (use-search hook)   ──┐
+  └── T-03 (SearchResultCard) ──┤
+                                └── T-04 (SearchPage)
+                                      └── T-06 (router)
 
-T-05 (AppLayout header) ── independent, can go any time after T-01 compiles
-T-07 (hook tests)        ── after T-02
-T-08 (card tests)        ── after T-03
-T-09 (page tests)        ── after T-04
+T-05 (AppLayout header) — independent of T-04, can run any time after T-01
+T-07 (hook tests)       — after T-02
+T-08 (card tests)       — after T-03
+T-09 (page tests)       — after T-04
 ```
