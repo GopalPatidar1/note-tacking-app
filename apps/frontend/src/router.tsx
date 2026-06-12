@@ -8,6 +8,7 @@ import { ResetPasswordPage } from '@/pages/auth/reset-password.page'
 import { NotesListPage } from '@/pages/notes/notes-list.page'
 import { NoteEditorPage } from '@/pages/notes/note-editor.page'
 import { SearchPage } from '@/pages/notes/search.page'
+import { PublicNotePage } from '@/pages/public/public-note.page'
 
 export const router = createBrowserRouter([
   {
@@ -28,5 +29,6 @@ export const router = createBrowserRouter([
       { path: '/search',    element: <SearchPage /> },
     ],
   },
+  { path: '/public/:token', element: <PublicNotePage /> },
   { path: '/', element: <Navigate to="/notes" replace /> },
 ])
