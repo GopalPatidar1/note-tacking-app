@@ -44,3 +44,9 @@ export class ForbiddenError extends AppError {
     super(message, 403, 'FORBIDDEN')
   }
 }
+
+export class ShareLinkInvalidError extends AppError {
+  constructor(message = 'Share link not found or has expired') {
+    super(message, 404, 'SHARE_LINK_INVALID')
+  }
+}
