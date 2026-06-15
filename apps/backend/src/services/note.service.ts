@@ -1,4 +1,4 @@
-import type { Note, Tag } from '@prisma/client'
+import type { Note, Tag, NoteVersion } from '@prisma/client'
 import type {
   CreateNoteDTO,
   UpdateNoteDTO,
@@ -6,6 +6,8 @@ import type {
   NoteDTO,
   TagDTO,
   PaginatedNotesDTO,
+  NoteVersionDTO,
+  PaginatedVersionsDTO,
 } from '@note-app/shared'
 import { prisma } from '../lib/prisma'
 import { noteRepository } from '../repositories/note.repository'
@@ -27,6 +29,17 @@ function toTagDTO(tag: Tag): TagDTO {
   return { id: tag.id, userId: tag.userId, name: tag.name, color: tag.color }
 }
 
+function toVersionDTO(v: NoteVersion): NoteVersionDTO {
+  return {
+    id:            v.id,
+    noteId:        v.noteId,
+    title:         v.title,
+    content:       v.content,
+    versionNumber: v.versionNumber,
+    createdAt:     v.createdAt.toISOString(),
+  }
+}
+
 function toNoteDTO(note: NoteWithTags): NoteDTO {
   return {
     id:        note.id,
@@ -37,6 +50,15 @@ function toNoteDTO(note: NoteWithTags): NoteDTO {
     deletedAt: note.deletedAt?.toISOString() ?? null,
     createdAt: note.createdAt.toISOString(),
     updatedAt: note.updatedAt.toISOString(),
+  }
+}
+
+async function checkNoteOwnership(noteId: string, userId: string): Promise<void> {
+  const note = await noteRepository.findById(noteId, userId)
+  if (!note) {
+    const exists = await noteRepository.findByIdOnly(noteId)
+    if (exists) throw new ForbiddenError('Access denied')
+    throw new NotFoundError('Note not found')
   }
 }
 
@@ -109,5 +131,53 @@ export const noteService = {
     if (!note) throw new NotFoundError('Note not found')
     if (note.deletedAt) return
     await noteRepository.softDelete(noteId)
+  },
+
+  async listVersions(
+    userId: string,
+    noteId: string,
+    page: number,
+    limit: number,
+  ): Promise<PaginatedVersionsDTO> {
+    await checkNoteOwnership(noteId, userId)
+    const { items, total } = await noteVersionRepository.listByNoteId(noteId, { page, limit })
+    return { items: items.map(toVersionDTO), total, page, limit }
+  },
+
+  async getVersion(
+    userId: string,
+    noteId: string,
+    versionId: string,
+  ): Promise<NoteVersionDTO> {
+    await checkNoteOwnership(noteId, userId)
+    const version = await noteVersionRepository.findById(versionId, noteId)
+    if (!version) throw new NotFoundError('Version not found')
+    return toVersionDTO(version)
+  },
+
+  async restoreVersion(
+    userId: string,
+    noteId: string,
+    versionId: string,
+  ): Promise<NoteDTO> {
+    await checkNoteOwnership(noteId, userId)
+    const version = await noteVersionRepository.findById(versionId, noteId)
+    if (!version) throw new NotFoundError('Version not found')
+
+    const restored = await prisma.$transaction(async (tx) => {
+      const updated = await noteRepository.update(
+        noteId,
+        { title: version.title, content: version.content },
+        tx,
+      )
+      const versionNumber = await noteVersionRepository.getNextVersionNumber(noteId, tx)
+      await noteVersionRepository.create(
+        { noteId, title: updated.title, content: updated.content, versionNumber },
+        tx,
+      )
+      return updated
+    })
+
+    return toNoteDTO(restored)
   },
 }

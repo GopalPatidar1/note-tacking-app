@@ -12,4 +12,8 @@ router.get('/:id',    noteController.getById)
 router.patch('/:id',  noteController.update)
 router.delete('/:id', noteController.delete)
 
+router.get('/:id/versions',                      noteController.listVersions)
+router.get('/:id/versions/:versionId',           noteController.getVersion)
+router.post('/:id/versions/:versionId/restore',  noteController.restoreVersion)
+
 export default router

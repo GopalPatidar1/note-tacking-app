@@ -29,6 +29,13 @@ export const noteRepository = {
     })
   },
 
+  findByIdOnly(id: string) {
+    return prisma.note.findFirst({
+      where:   { id, deletedAt: null },
+      include: NOTE_INCLUDE,
+    })
+  },
+
   findByIdIncludingDeleted(id: string, userId: string) {
     return prisma.note.findFirst({
       where:   { id, userId },
