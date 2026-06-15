@@ -10,7 +10,7 @@ import { MAX_VERSIONS_PER_NOTE } from '@note-app/shared'
 import { prisma }                from '../lib/prisma'
 import { noteRepository }        from '../repositories/note.repository'
 import { noteVersionRepository } from '../repositories/note-version.repository'
-import { NotFoundError }         from '../errors/domain-errors'
+import { NotFoundError, ForbiddenError } from '../errors/domain-errors'
 
 type NoteWithTags = Note & { tags: Tag[] }
 
@@ -38,10 +38,18 @@ function toNoteDTO(note: NoteWithTags): NoteDTO {
   }
 }
 
+async function checkNoteOwnership(noteId: string, userId: string): Promise<void> {
+  const note = await noteRepository.findById(noteId, userId)
+  if (!note) {
+    const exists = await noteRepository.findByIdOnly(noteId)
+    if (exists) throw new ForbiddenError('Access denied')
+    throw new NotFoundError('Note not found')
+  }
+}
+
 export const noteVersionService = {
   async list(userId: string, noteId: string, query: ListVersionsQueryDTO): Promise<PaginatedVersionsDTO> {
-    const note = await noteRepository.findById(noteId, userId)
-    if (!note) throw new NotFoundError('Note not found')
+    await checkNoteOwnership(noteId, userId)
 
     const { items, total } = await noteVersionRepository.findAll(noteId, {
       page: query.page, limit: query.limit,
@@ -50,8 +58,7 @@ export const noteVersionService = {
   },
 
   async getById(userId: string, noteId: string, versionId: string): Promise<NoteVersionDTO> {
-    const note = await noteRepository.findById(noteId, userId)
-    if (!note) throw new NotFoundError('Note not found')
+    await checkNoteOwnership(noteId, userId)
 
     const version = await noteVersionRepository.findById(versionId, noteId)
     if (!version) throw new NotFoundError('Version not found')
@@ -60,8 +67,7 @@ export const noteVersionService = {
   },
 
   async restore(userId: string, noteId: string, versionId: string): Promise<NoteDTO> {
-    const note = await noteRepository.findById(noteId, userId)
-    if (!note) throw new NotFoundError('Note not found')
+    await checkNoteOwnership(noteId, userId)
 
     const version = await noteVersionRepository.findById(versionId, noteId)
     if (!version) throw new NotFoundError('Version not found')

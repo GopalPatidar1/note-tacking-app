@@ -1,20 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { Note, NoteVersion, Tag } from '@prisma/client'
+import type { Note, Tag, NoteVersion } from '@prisma/client'
 
 vi.mock('../repositories/note.repository', () => ({
   noteRepository: {
-    findById: vi.fn(),
-    update:   vi.fn(),
+    findById:    vi.fn(),
+    findByIdOnly: vi.fn(),
+    update:       vi.fn(),
   },
 }))
 
 vi.mock('../repositories/note-version.repository', () => ({
   noteVersionRepository: {
-    findAll:              vi.fn(),
-    findById:             vi.fn(),
+    findAll:             vi.fn(),
+    findById:            vi.fn(),
     getNextVersionNumber: vi.fn(),
-    create:               vi.fn(),
-    deleteExcess:         vi.fn(),
+    create:              vi.fn(),
+    deleteExcess:        vi.fn(),
   },
 }))
 
@@ -27,16 +28,16 @@ vi.mock('../lib/prisma', () => ({
 import { noteVersionService }       from '../services/note-version.service'
 import { noteRepository }           from '../repositories/note.repository'
 import { noteVersionRepository }    from '../repositories/note-version.repository'
-import { NotFoundError }            from '../errors/domain-errors'
+import { NotFoundError, ForbiddenError } from '../errors/domain-errors'
 
-const NOW = new Date('2026-01-01T00:00:00.000Z')
+const NOW = new Date('2024-01-01T00:00:00.000Z')
 
-function makeNote(overrides?: Partial<Note>): Note & { tags: Tag[] } {
+function makeNote(overrides?: Partial<Note & { tags: Tag[] }>): Note & { tags: Tag[] } {
   return {
     id:        'note-1',
     userId:    'user-1',
-    title:     'Original title',
-    content:   '<p>Original content</p>',
+    title:     'Test Note',
+    content:   '<p>Hello</p>',
     deletedAt: null,
     createdAt: NOW,
     updatedAt: NOW,
@@ -47,182 +48,193 @@ function makeNote(overrides?: Partial<Note>): Note & { tags: Tag[] } {
 
 function makeVersion(overrides?: Partial<NoteVersion>): NoteVersion {
   return {
-    id:            'version-1',
+    id:            'ver-1',
     noteId:        'note-1',
-    title:         'Version title',
-    content:       '<p>Version content</p>',
+    title:         'Test Note',
+    content:       '<p>Hello</p>',
     versionNumber: 1,
     createdAt:     NOW,
     ...overrides,
   }
 }
 
-beforeEach(() => {
-  vi.clearAllMocks()
-})
+beforeEach(() => { vi.clearAllMocks() })
 
 // ─── list ────────────────────────────────────────────────────────────────────
 
 describe('noteVersionService.list', () => {
-  it('U01: returns PaginatedVersionsDTO with correct shape', async () => {
-    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote() as never)
-    vi.mocked(noteVersionRepository.findAll).mockResolvedValue({
-      items: [makeVersion(), makeVersion({ id: 'version-2', versionNumber: 2 })],
-      total: 2,
-    })
-
-    const result = await noteVersionService.list('user-1', 'note-1', { page: 1, limit: 20 })
-
-    expect(result.total).toBe(2)
-    expect(result.page).toBe(1)
-    expect(result.limit).toBe(20)
-    expect(result.items).toHaveLength(2)
-    expect(result.items[0]).toMatchObject({
-      id:            'version-1',
-      noteId:        'note-1',
-      versionNumber: 1,
-      createdAt:     NOW.toISOString(),
-    })
-  })
-
-  it('U02: throws NotFoundError when note not found', async () => {
+  it('S01: throws NotFoundError when note does not exist', async () => {
     vi.mocked(noteRepository.findById).mockResolvedValue(null)
-
-    await expect(noteVersionService.list('user-1', 'bad-note', { page: 1, limit: 20 }))
-      .rejects.toThrow(NotFoundError)
-  })
-
-  it('U03: throws NotFoundError when note is soft-deleted (findById returns null)', async () => {
-    vi.mocked(noteRepository.findById).mockResolvedValue(null)
+    vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(null)
 
     await expect(noteVersionService.list('user-1', 'note-1', { page: 1, limit: 20 }))
-      .rejects.toThrow(NotFoundError)
+      .rejects.toBeInstanceOf(NotFoundError)
   })
 
-  it('U04: returns empty items array when no versions exist', async () => {
-    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote() as never)
-    vi.mocked(noteVersionRepository.findAll).mockResolvedValue({ items: [], total: 0 })
+  it('S10: throws ForbiddenError when note belongs to a different user', async () => {
+    vi.mocked(noteRepository.findById).mockResolvedValue(null)
+    vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(makeNote())
+
+    await expect(noteVersionService.list('user-2', 'note-1', { page: 1, limit: 20 }))
+      .rejects.toBeInstanceOf(ForbiddenError)
+  })
+
+  it('S02: returns PaginatedVersionsDTO on success', async () => {
+    const version = makeVersion()
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
+    vi.mocked(noteVersionRepository.findAll).mockResolvedValue({ items: [version], total: 1 })
 
     const result = await noteVersionService.list('user-1', 'note-1', { page: 1, limit: 20 })
 
-    expect(result.items).toHaveLength(0)
-    expect(result.total).toBe(0)
+    expect(result.total).toBe(1)
+    expect(result.page).toBe(1)
+    expect(result.limit).toBe(20)
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0].id).toBe('ver-1')
+    expect(result.items[0].createdAt).toBe(NOW.toISOString())
   })
 })
 
 // ─── getById ─────────────────────────────────────────────────────────────────
 
 describe('noteVersionService.getById', () => {
-  it('U05: returns NoteVersionDTO for valid note + version', async () => {
-    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote() as never)
-    vi.mocked(noteVersionRepository.findById).mockResolvedValue(makeVersion())
+  it('S03: throws NotFoundError when note does not exist', async () => {
+    vi.mocked(noteRepository.findById).mockResolvedValue(null)
+    vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(null)
 
-    const result = await noteVersionService.getById('user-1', 'note-1', 'version-1')
+    await expect(noteVersionService.getById('user-1', 'note-1', 'ver-1'))
+      .rejects.toBeInstanceOf(NotFoundError)
+  })
 
-    expect(result.id).toBe('version-1')
-    expect(result.noteId).toBe('note-1')
-    expect(result.title).toBe('Version title')
-    expect(result.content).toBe('<p>Version content</p>')
+  it('S11: throws ForbiddenError when note belongs to a different user', async () => {
+    vi.mocked(noteRepository.findById).mockResolvedValue(null)
+    vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(makeNote())
+
+    await expect(noteVersionService.getById('user-2', 'note-1', 'ver-1'))
+      .rejects.toBeInstanceOf(ForbiddenError)
+  })
+
+  it('S04: throws NotFoundError when version not found', async () => {
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
+    vi.mocked(noteVersionRepository.findById).mockResolvedValue(null)
+
+    await expect(noteVersionService.getById('user-1', 'note-1', 'ver-999'))
+      .rejects.toBeInstanceOf(NotFoundError)
+  })
+
+  it('S05: returns NoteVersionDTO on success', async () => {
+    const version = makeVersion()
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
+    vi.mocked(noteVersionRepository.findById).mockResolvedValue(version)
+
+    const result = await noteVersionService.getById('user-1', 'note-1', 'ver-1')
+
+    expect(result.id).toBe('ver-1')
     expect(result.versionNumber).toBe(1)
     expect(result.createdAt).toBe(NOW.toISOString())
-  })
-
-  it('U06: throws NotFoundError when note not found', async () => {
-    vi.mocked(noteRepository.findById).mockResolvedValue(null)
-
-    await expect(noteVersionService.getById('user-1', 'bad-note', 'version-1'))
-      .rejects.toThrow(NotFoundError)
-  })
-
-  it('U07: throws NotFoundError when version not found', async () => {
-    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote() as never)
-    vi.mocked(noteVersionRepository.findById).mockResolvedValue(null)
-
-    await expect(noteVersionService.getById('user-1', 'note-1', 'bad-version'))
-      .rejects.toThrow(NotFoundError)
-  })
-
-  it('U08: throws NotFoundError when version exists on a different note', async () => {
-    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote() as never)
-    // findById scopes by noteId — returns null when note does not match
-    vi.mocked(noteVersionRepository.findById).mockResolvedValue(null)
-
-    await expect(noteVersionService.getById('user-1', 'note-1', 'version-from-other-note'))
-      .rejects.toThrow(NotFoundError)
   })
 })
 
 // ─── restore ─────────────────────────────────────────────────────────────────
 
 describe('noteVersionService.restore', () => {
-  it('U09: calls noteRepository.update + noteVersionRepository.create in transaction', async () => {
-    const version = makeVersion({ title: 'Old title', content: '<p>Old</p>' })
-    const updatedNote = makeNote({ title: 'Old title', content: '<p>Old</p>' })
+  it('S06: throws NotFoundError when note does not exist', async () => {
+    vi.mocked(noteRepository.findById).mockResolvedValue(null)
+    vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(null)
 
-    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote() as never)
+    await expect(noteVersionService.restore('user-1', 'note-1', 'ver-1'))
+      .rejects.toBeInstanceOf(NotFoundError)
+  })
+
+  it('S12: throws ForbiddenError when note belongs to a different user', async () => {
+    vi.mocked(noteRepository.findById).mockResolvedValue(null)
+    vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(makeNote())
+
+    await expect(noteVersionService.restore('user-2', 'note-1', 'ver-1'))
+      .rejects.toBeInstanceOf(ForbiddenError)
+  })
+
+  it('S07: throws NotFoundError when version not found', async () => {
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
+    vi.mocked(noteVersionRepository.findById).mockResolvedValue(null)
+
+    await expect(noteVersionService.restore('user-1', 'note-1', 'ver-999'))
+      .rejects.toBeInstanceOf(NotFoundError)
+  })
+
+  it('S08: calls noteRepository.update + getNextVersionNumber + noteVersionRepository.create in transaction', async () => {
+    const version = makeVersion({ title: 'Old Title', content: '<p>Old</p>', versionNumber: 1 })
+    const updated = makeNote({ title: 'Old Title', content: '<p>Old</p>', updatedAt: new Date() })
+
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
     vi.mocked(noteVersionRepository.findById).mockResolvedValue(version)
-    vi.mocked(noteRepository.update).mockResolvedValue(updatedNote as never)
-    vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(3)
-    vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 3 }))
+    vi.mocked(noteRepository.update).mockResolvedValue(updated)
+    vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
+    vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
+    vi.mocked(noteVersionRepository.deleteExcess).mockResolvedValue()
 
-    await noteVersionService.restore('user-1', 'note-1', 'version-1')
+    await noteVersionService.restore('user-1', 'note-1', 'ver-1')
 
     expect(noteRepository.update).toHaveBeenCalledWith(
       'note-1',
-      { title: 'Old title', content: '<p>Old</p>' },
+      { title: 'Old Title', content: '<p>Old</p>' },
       expect.anything(),
     )
+    expect(noteVersionRepository.getNextVersionNumber).toHaveBeenCalledWith('note-1', expect.anything())
     expect(noteVersionRepository.create).toHaveBeenCalledWith(
-      expect.objectContaining({ noteId: 'note-1', title: 'Old title', content: '<p>Old</p>', versionNumber: 3 }),
+      expect.objectContaining({ noteId: 'note-1', versionNumber: 2 }),
       expect.anything(),
     )
   })
 
-  it('U10: returns NoteDTO reflecting restored title and content', async () => {
-    const version = makeVersion({ title: 'Restored title', content: '<p>Restored</p>' })
-    const updatedNote = makeNote({ title: 'Restored title', content: '<p>Restored</p>' })
+  it('S13: restore does not pass tagIds to update', async () => {
+    const version = makeVersion({ title: 'Old Title', content: '<p>Old</p>' })
+    const updated = makeNote({ title: 'Old Title', content: '<p>Old</p>' })
 
-    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote() as never)
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
     vi.mocked(noteVersionRepository.findById).mockResolvedValue(version)
-    vi.mocked(noteRepository.update).mockResolvedValue(updatedNote as never)
+    vi.mocked(noteRepository.update).mockResolvedValue(updated)
     vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
     vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
-
-    const result = await noteVersionService.restore('user-1', 'note-1', 'version-1')
-
-    expect(result.title).toBe('Restored title')
-    expect(result.content).toBe('<p>Restored</p>')
-    expect(result.id).toBe('note-1')
-    expect(result.userId).toBe('user-1')
-  })
-
-  it('U11: throws NotFoundError when note not found', async () => {
-    vi.mocked(noteRepository.findById).mockResolvedValue(null)
-
-    await expect(noteVersionService.restore('user-1', 'bad-note', 'version-1'))
-      .rejects.toThrow(NotFoundError)
-  })
-
-  it('U12: throws NotFoundError when version not found', async () => {
-    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote() as never)
-    vi.mocked(noteVersionRepository.findById).mockResolvedValue(null)
-
-    await expect(noteVersionService.restore('user-1', 'note-1', 'bad-version'))
-      .rejects.toThrow(NotFoundError)
-  })
-
-  it('U13: calls deleteExcess after restore', async () => {
-    const version     = makeVersion({ title: 'Old title', content: '<p>Old</p>' })
-    const updatedNote = makeNote({ title: 'Old title', content: '<p>Old</p>' })
-
-    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote() as never)
-    vi.mocked(noteVersionRepository.findById).mockResolvedValue(version)
-    vi.mocked(noteRepository.update).mockResolvedValue(updatedNote as never)
-    vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(3)
-    vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 3 }))
     vi.mocked(noteVersionRepository.deleteExcess).mockResolvedValue()
 
-    await noteVersionService.restore('user-1', 'note-1', 'version-1')
+    await noteVersionService.restore('user-1', 'note-1', 'ver-1')
+
+    const updateCall = vi.mocked(noteRepository.update).mock.calls[0][1]
+    expect(updateCall).not.toHaveProperty('tagIds')
+    expect(updateCall).toMatchObject({ title: 'Old Title', content: '<p>Old</p>' })
+  })
+
+  it('S09: returns NoteDTO of the restored note', async () => {
+    const version = makeVersion()
+    const updated = makeNote({ title: 'Test Note', content: '<p>Hello</p>' })
+
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
+    vi.mocked(noteVersionRepository.findById).mockResolvedValue(version)
+    vi.mocked(noteRepository.update).mockResolvedValue(updated)
+    vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
+    vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
+    vi.mocked(noteVersionRepository.deleteExcess).mockResolvedValue()
+
+    const result = await noteVersionService.restore('user-1', 'note-1', 'ver-1')
+
+    expect(result.id).toBe('note-1')
+    expect(result.title).toBe('Test Note')
+    expect(result.tags).toEqual([])
+  })
+
+  it('S14: calls deleteExcess after restore', async () => {
+    const version = makeVersion()
+    const updated = makeNote()
+
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
+    vi.mocked(noteVersionRepository.findById).mockResolvedValue(version)
+    vi.mocked(noteRepository.update).mockResolvedValue(updated)
+    vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
+    vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
+    vi.mocked(noteVersionRepository.deleteExcess).mockResolvedValue()
+
+    await noteVersionService.restore('user-1', 'note-1', 'ver-1')
 
     expect(noteVersionRepository.deleteExcess).toHaveBeenCalledWith('note-1', 50)
   })

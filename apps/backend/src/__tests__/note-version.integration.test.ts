@@ -146,14 +146,14 @@ describe('GET /api/notes/:id/versions', () => {
     expect(res.status).toBe(404)
   })
 
-  skipIfNoDb('I06: 404, note belongs to another user', async () => {
+  skipIfNoDb('I06: 403, note belongs to another user', async () => {
     const aliceToken = await registerAndLogin('alice@example.com')
     const bobToken   = await registerAndLogin('bob@example.com')
     const noteId     = await createNote(aliceToken)
 
     const res = await listVersions(bobToken, noteId)
 
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(403)
   })
 
   skipIfNoDb('I07: 404, note is soft-deleted', async () => {
@@ -219,6 +219,21 @@ describe('GET /api/notes/:id/versions/:versionId', () => {
       .set('Authorization', `Bearer ${token}`)
 
     expect(res.status).toBe(404)
+  })
+
+  skipIfNoDb('I11b: 403, note belongs to another user', async () => {
+    const aliceToken = await registerAndLogin('alice@example.com')
+    const bobToken   = await registerAndLogin('bob@example.com')
+    const noteId     = await createNote(aliceToken)
+
+    const listRes = await listVersions(aliceToken, noteId)
+    const versionId = listRes.body.data.items[0].id as string
+
+    const res = await request
+      .get(`/api/notes/${noteId}/versions/${versionId}`)
+      .set('Authorization', `Bearer ${bobToken}`)
+
+    expect(res.status).toBe(403)
   })
 })
 
@@ -330,6 +345,19 @@ describe('POST /api/notes/:id/versions/:versionId/restore', () => {
       .set('Authorization', `Bearer ${token}`)
 
     expect(res.status).toBe(404)
+  })
+
+  skipIfNoDb('I18b: 403, note belongs to another user', async () => {
+    const aliceToken = await registerAndLogin('alice@example.com')
+    const bobToken   = await registerAndLogin('bob@example.com')
+    const { noteId, versions } = await setupVersions(aliceToken)
+    const v1Id = versions[1].id
+
+    const res = await request
+      .post(`/api/notes/${noteId}/versions/${v1Id}/restore`)
+      .set('Authorization', `Bearer ${bobToken}`)
+
+    expect(res.status).toBe(403)
   })
 })
 

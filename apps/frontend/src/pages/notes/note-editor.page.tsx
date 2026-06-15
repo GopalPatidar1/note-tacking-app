@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, Check, Loader2, AlertCircle, Share2 } from 'lucide-react'
+import { ArrowLeft, Check, Loader2, AlertCircle, Share2, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { TipTapEditor } from '@/components/notes/tiptap-editor'
 import { TagSelector } from '@/components/notes/tag-selector'
 import { ShareModal } from '@/components/sharing/share-modal'
+import { VersionHistorySheet } from '@/components/versions/version-history-sheet'
 import { useNote } from '@/hooks/notes/use-note'
 import { useCreateNote } from '@/hooks/notes/use-create-note'
 import { useUpdateNote } from '@/hooks/notes/use-update-note'
@@ -33,7 +34,8 @@ export function NoteEditorPage() {
   const [tagIds,    setTagIds]     = useState<string[]>([])
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [initialised, setInitialised] = useState(false)
-  const [shareOpen, setShareOpen] = useState(false)
+  const [shareOpen,   setShareOpen]   = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const autosaveTimer     = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savedDisplayTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -155,6 +157,15 @@ export function NoteEditorPage() {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => setHistoryOpen(true)}
+                className="gap-1"
+              >
+                <History className="h-4 w-4" />
+                History
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => setShareOpen(true)}
                 className="gap-1"
               >
@@ -162,6 +173,7 @@ export function NoteEditorPage() {
                 Share
               </Button>
               <ShareModal noteId={id!} open={shareOpen} onOpenChange={setShareOpen} />
+              <VersionHistorySheet noteId={id!} open={historyOpen} onOpenChange={setHistoryOpen} />
             </>
           ) : (
             <Button

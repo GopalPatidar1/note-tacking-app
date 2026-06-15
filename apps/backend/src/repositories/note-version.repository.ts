@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client'
+import type { Prisma, NoteVersion } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 
 type Tx = Prisma.TransactionClient
@@ -22,8 +22,11 @@ export const noteVersionRepository = {
     return client.noteVersion.create({ data })
   },
 
-  findAll(noteId: string, opts: { page: number; limit: number }) {
-    return Promise.all([
+  async listByNoteId(
+    noteId: string,
+    opts: { page: number; limit: number },
+  ): Promise<{ items: NoteVersion[]; total: number }> {
+    const [items, total] = await Promise.all([
       prisma.noteVersion.findMany({
         where:   { noteId },
         orderBy: { versionNumber: 'desc' },
@@ -31,13 +34,28 @@ export const noteVersionRepository = {
         take:    opts.limit,
       }),
       prisma.noteVersion.count({ where: { noteId } }),
-    ]).then(([items, total]) => ({ items, total }))
+    ])
+    return { items, total }
   },
 
-  findById(versionId: string, noteId: string) {
-    return prisma.noteVersion.findFirst({
-      where: { id: versionId, noteId },
-    })
+  async findAll(
+    noteId: string,
+    opts: { page: number; limit: number },
+  ): Promise<{ items: NoteVersion[]; total: number }> {
+    const [items, total] = await Promise.all([
+      prisma.noteVersion.findMany({
+        where:   { noteId },
+        orderBy: { versionNumber: 'desc' },
+        skip:    (opts.page - 1) * opts.limit,
+        take:    opts.limit,
+      }),
+      prisma.noteVersion.count({ where: { noteId } }),
+    ])
+    return { items, total }
+  },
+
+  findById(id: string, noteId: string): Promise<NoteVersion | null> {
+    return prisma.noteVersion.findFirst({ where: { id, noteId } })
   },
 
   async deleteExcess(noteId: string, keepCount: number): Promise<void> {
