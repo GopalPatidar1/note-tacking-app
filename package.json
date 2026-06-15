@@ -8,7 +8,7 @@
     "dev:frontend": "pnpm --filter frontend dev",
     "build": "pnpm --filter '@note-app/shared' build && pnpm --filter backend build",
     "tsc": "tsc --noEmit -p tsconfig.json",
-    "test:e2e": "playwright test"
+    "test:e2e": "pnpm --filter '@note-app/e2e' test"
   },
   "devDependencies": {
     "typescript": "^5.4.0"
