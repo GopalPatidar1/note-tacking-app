@@ -38,7 +38,7 @@ test.describe('Auth — unauthenticated journeys', () => {
     await auth.passwordInput().fill('WrongPassword!')
     await auth.signInButton().click()
 
-    await expect(page.getByRole('alert')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('[data-sonner-toast][data-type="error"]')).toBeVisible({ timeout: 5000 })
     await expect(page).toHaveURL('/login')
   })
 })
