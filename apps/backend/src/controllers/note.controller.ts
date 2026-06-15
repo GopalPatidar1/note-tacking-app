@@ -30,34 +30,4 @@ export const noteController = {
     await noteService.delete(req.user.id, req.params.id as string)
     res.status(200).json({ data: { message: 'Note deleted' } })
   },
-
-  async listVersions(req: Request, res: Response) {
-    const page  = Math.max(1, parseInt(req.query.page  as string) || 1)
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20))
-    const result = await noteService.listVersions(
-      req.user.id,
-      req.params.id as string,
-      page,
-      limit,
-    )
-    res.status(200).json({ data: result })
-  },
-
-  async getVersion(req: Request, res: Response) {
-    const version = await noteService.getVersion(
-      req.user.id,
-      req.params.id        as string,
-      req.params.versionId as string,
-    )
-    res.status(200).json({ data: version })
-  },
-
-  async restoreVersion(req: Request, res: Response) {
-    const note = await noteService.restoreVersion(
-      req.user.id,
-      req.params.id        as string,
-      req.params.versionId as string,
-    )
-    res.status(200).json({ data: note })
-  },
 }

@@ -3,36 +3,31 @@ import type { Note, Tag, NoteVersion } from '@prisma/client'
 
 vi.mock('../repositories/note.repository', () => ({
   noteRepository: {
-    create:                   vi.fn(),
-    findById:                 vi.fn(),
-    findByIdOnly:             vi.fn(),
-    findByIdIncludingDeleted: vi.fn(),
-    findAll:                  vi.fn(),
-    update:                   vi.fn(),
-    softDelete:               vi.fn(),
+    findById:    vi.fn(),
+    findByIdOnly: vi.fn(),
+    update:       vi.fn(),
   },
 }))
 
 vi.mock('../repositories/note-version.repository', () => ({
   noteVersionRepository: {
+    findAll:             vi.fn(),
+    findById:            vi.fn(),
     getNextVersionNumber: vi.fn(),
     create:              vi.fn(),
-    listByNoteId:        vi.fn(),
-    findById:            vi.fn(),
+    deleteExcess:        vi.fn(),
   },
 }))
 
 vi.mock('../lib/prisma', () => ({
   prisma: {
-    $transaction: vi.fn(),
-    tag: { count: vi.fn() },
+    $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn({})),
   },
 }))
 
-import { noteService } from '../services/note.service'
-import { noteRepository } from '../repositories/note.repository'
-import { noteVersionRepository } from '../repositories/note-version.repository'
-import { prisma } from '../lib/prisma'
+import { noteVersionService }       from '../services/note-version.service'
+import { noteRepository }           from '../repositories/note.repository'
+import { noteVersionRepository }    from '../repositories/note-version.repository'
 import { NotFoundError, ForbiddenError } from '../errors/domain-errors'
 
 const NOW = new Date('2024-01-01T00:00:00.000Z')
@@ -65,14 +60,14 @@ function makeVersion(overrides?: Partial<NoteVersion>): NoteVersion {
 
 beforeEach(() => { vi.clearAllMocks() })
 
-// ─── listVersions ─────────────────────────────────────────────────────────────
+// ─── list ────────────────────────────────────────────────────────────────────
 
-describe('noteService.listVersions', () => {
+describe('noteVersionService.list', () => {
   it('S01: throws NotFoundError when note does not exist', async () => {
     vi.mocked(noteRepository.findById).mockResolvedValue(null)
     vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(null)
 
-    await expect(noteService.listVersions('user-1', 'note-1', 1, 20))
+    await expect(noteVersionService.list('user-1', 'note-1', { page: 1, limit: 20 }))
       .rejects.toBeInstanceOf(NotFoundError)
   })
 
@@ -80,20 +75,16 @@ describe('noteService.listVersions', () => {
     vi.mocked(noteRepository.findById).mockResolvedValue(null)
     vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(makeNote())
 
-    await expect(noteService.listVersions('user-1', 'note-1', 1, 20))
+    await expect(noteVersionService.list('user-2', 'note-1', { page: 1, limit: 20 }))
       .rejects.toBeInstanceOf(ForbiddenError)
   })
 
   it('S02: returns PaginatedVersionsDTO on success', async () => {
-    const note    = makeNote()
     const version = makeVersion()
-    vi.mocked(noteRepository.findById).mockResolvedValue(note)
-    vi.mocked(noteVersionRepository.listByNoteId).mockResolvedValue({
-      items: [version],
-      total: 1,
-    })
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
+    vi.mocked(noteVersionRepository.findAll).mockResolvedValue({ items: [version], total: 1 })
 
-    const result = await noteService.listVersions('user-1', 'note-1', 1, 20)
+    const result = await noteVersionService.list('user-1', 'note-1', { page: 1, limit: 20 })
 
     expect(result.total).toBe(1)
     expect(result.page).toBe(1)
@@ -104,14 +95,14 @@ describe('noteService.listVersions', () => {
   })
 })
 
-// ─── getVersion ───────────────────────────────────────────────────────────────
+// ─── getById ─────────────────────────────────────────────────────────────────
 
-describe('noteService.getVersion', () => {
+describe('noteVersionService.getById', () => {
   it('S03: throws NotFoundError when note does not exist', async () => {
     vi.mocked(noteRepository.findById).mockResolvedValue(null)
     vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(null)
 
-    await expect(noteService.getVersion('user-1', 'note-1', 'ver-1'))
+    await expect(noteVersionService.getById('user-1', 'note-1', 'ver-1'))
       .rejects.toBeInstanceOf(NotFoundError)
   })
 
@@ -119,7 +110,7 @@ describe('noteService.getVersion', () => {
     vi.mocked(noteRepository.findById).mockResolvedValue(null)
     vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(makeNote())
 
-    await expect(noteService.getVersion('user-1', 'note-1', 'ver-1'))
+    await expect(noteVersionService.getById('user-2', 'note-1', 'ver-1'))
       .rejects.toBeInstanceOf(ForbiddenError)
   })
 
@@ -127,7 +118,7 @@ describe('noteService.getVersion', () => {
     vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
     vi.mocked(noteVersionRepository.findById).mockResolvedValue(null)
 
-    await expect(noteService.getVersion('user-1', 'note-1', 'ver-999'))
+    await expect(noteVersionService.getById('user-1', 'note-1', 'ver-999'))
       .rejects.toBeInstanceOf(NotFoundError)
   })
 
@@ -136,7 +127,7 @@ describe('noteService.getVersion', () => {
     vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
     vi.mocked(noteVersionRepository.findById).mockResolvedValue(version)
 
-    const result = await noteService.getVersion('user-1', 'note-1', 'ver-1')
+    const result = await noteVersionService.getById('user-1', 'note-1', 'ver-1')
 
     expect(result.id).toBe('ver-1')
     expect(result.versionNumber).toBe(1)
@@ -144,14 +135,14 @@ describe('noteService.getVersion', () => {
   })
 })
 
-// ─── restoreVersion ───────────────────────────────────────────────────────────
+// ─── restore ─────────────────────────────────────────────────────────────────
 
-describe('noteService.restoreVersion', () => {
+describe('noteVersionService.restore', () => {
   it('S06: throws NotFoundError when note does not exist', async () => {
     vi.mocked(noteRepository.findById).mockResolvedValue(null)
     vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(null)
 
-    await expect(noteService.restoreVersion('user-1', 'note-1', 'ver-1'))
+    await expect(noteVersionService.restore('user-1', 'note-1', 'ver-1'))
       .rejects.toBeInstanceOf(NotFoundError)
   })
 
@@ -159,7 +150,7 @@ describe('noteService.restoreVersion', () => {
     vi.mocked(noteRepository.findById).mockResolvedValue(null)
     vi.mocked(noteRepository.findByIdOnly).mockResolvedValue(makeNote())
 
-    await expect(noteService.restoreVersion('user-1', 'note-1', 'ver-1'))
+    await expect(noteVersionService.restore('user-2', 'note-1', 'ver-1'))
       .rejects.toBeInstanceOf(ForbiddenError)
   })
 
@@ -167,25 +158,22 @@ describe('noteService.restoreVersion', () => {
     vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
     vi.mocked(noteVersionRepository.findById).mockResolvedValue(null)
 
-    await expect(noteService.restoreVersion('user-1', 'note-1', 'ver-999'))
+    await expect(noteVersionService.restore('user-1', 'note-1', 'ver-999'))
       .rejects.toBeInstanceOf(NotFoundError)
   })
 
   it('S08: calls noteRepository.update + getNextVersionNumber + noteVersionRepository.create in transaction', async () => {
-    const note    = makeNote()
     const version = makeVersion({ title: 'Old Title', content: '<p>Old</p>', versionNumber: 1 })
     const updated = makeNote({ title: 'Old Title', content: '<p>Old</p>', updatedAt: new Date() })
 
-    vi.mocked(noteRepository.findById).mockResolvedValue(note)
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
     vi.mocked(noteVersionRepository.findById).mockResolvedValue(version)
-    vi.mocked(prisma.$transaction).mockImplementation(async (fn) => {
-      vi.mocked(noteRepository.update).mockResolvedValue(updated)
-      vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
-      vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
-      return fn({} as never)
-    })
+    vi.mocked(noteRepository.update).mockResolvedValue(updated)
+    vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
+    vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
+    vi.mocked(noteVersionRepository.deleteExcess).mockResolvedValue()
 
-    await noteService.restoreVersion('user-1', 'note-1', 'ver-1')
+    await noteVersionService.restore('user-1', 'note-1', 'ver-1')
 
     expect(noteRepository.update).toHaveBeenCalledWith(
       'note-1',
@@ -199,48 +187,55 @@ describe('noteService.restoreVersion', () => {
     )
   })
 
-  it('S13: restoreVersion does not pass tagIds to update and returned DTO preserves existing tags', async () => {
-    const existingTag = { id: 'tag-1', userId: 'user-1', name: 'Work', color: '#000', createdAt: NOW }
-    const note    = makeNote({ tags: [existingTag] })
+  it('S13: restore does not pass tagIds to update', async () => {
     const version = makeVersion({ title: 'Old Title', content: '<p>Old</p>' })
-    const updated = makeNote({ title: 'Old Title', content: '<p>Old</p>', tags: [existingTag] })
+    const updated = makeNote({ title: 'Old Title', content: '<p>Old</p>' })
 
-    vi.mocked(noteRepository.findById).mockResolvedValue(note)
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
     vi.mocked(noteVersionRepository.findById).mockResolvedValue(version)
-    vi.mocked(prisma.$transaction).mockImplementation(async (fn) => {
-      vi.mocked(noteRepository.update).mockResolvedValue(updated)
-      vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
-      vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
-      return fn({} as never)
-    })
+    vi.mocked(noteRepository.update).mockResolvedValue(updated)
+    vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
+    vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
+    vi.mocked(noteVersionRepository.deleteExcess).mockResolvedValue()
 
-    const result = await noteService.restoreVersion('user-1', 'note-1', 'ver-1')
+    await noteVersionService.restore('user-1', 'note-1', 'ver-1')
 
     const updateCall = vi.mocked(noteRepository.update).mock.calls[0][1]
     expect(updateCall).not.toHaveProperty('tagIds')
     expect(updateCall).toMatchObject({ title: 'Old Title', content: '<p>Old</p>' })
-    expect(result.tags).toHaveLength(1)
-    expect(result.tags[0].id).toBe('tag-1')
   })
 
   it('S09: returns NoteDTO of the restored note', async () => {
-    const note    = makeNote()
     const version = makeVersion()
     const updated = makeNote({ title: 'Test Note', content: '<p>Hello</p>' })
 
-    vi.mocked(noteRepository.findById).mockResolvedValue(note)
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
     vi.mocked(noteVersionRepository.findById).mockResolvedValue(version)
-    vi.mocked(prisma.$transaction).mockImplementation(async (fn) => {
-      vi.mocked(noteRepository.update).mockResolvedValue(updated)
-      vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
-      vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
-      return fn({} as never)
-    })
+    vi.mocked(noteRepository.update).mockResolvedValue(updated)
+    vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
+    vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
+    vi.mocked(noteVersionRepository.deleteExcess).mockResolvedValue()
 
-    const result = await noteService.restoreVersion('user-1', 'note-1', 'ver-1')
+    const result = await noteVersionService.restore('user-1', 'note-1', 'ver-1')
 
     expect(result.id).toBe('note-1')
     expect(result.title).toBe('Test Note')
     expect(result.tags).toEqual([])
+  })
+
+  it('S14: calls deleteExcess after restore', async () => {
+    const version = makeVersion()
+    const updated = makeNote()
+
+    vi.mocked(noteRepository.findById).mockResolvedValue(makeNote())
+    vi.mocked(noteVersionRepository.findById).mockResolvedValue(version)
+    vi.mocked(noteRepository.update).mockResolvedValue(updated)
+    vi.mocked(noteVersionRepository.getNextVersionNumber).mockResolvedValue(2)
+    vi.mocked(noteVersionRepository.create).mockResolvedValue(makeVersion({ versionNumber: 2 }))
+    vi.mocked(noteVersionRepository.deleteExcess).mockResolvedValue()
+
+    await noteVersionService.restore('user-1', 'note-1', 'ver-1')
+
+    expect(noteVersionRepository.deleteExcess).toHaveBeenCalledWith('note-1', 50)
   })
 })

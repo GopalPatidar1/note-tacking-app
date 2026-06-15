@@ -37,7 +37,8 @@ describe('noteVersionRepository.listByNoteId', () => {
   it('R01: returns items with correct orderBy DESC and skip/take', async () => {
     const v1 = makeVersion({ versionNumber: 2, id: 'ver-2' })
     const v2 = makeVersion({ versionNumber: 1, id: 'ver-1' })
-    vi.mocked(prisma.$transaction).mockResolvedValue([[v1, v2], 2])
+    vi.mocked(prisma.noteVersion.findMany).mockResolvedValue([v1, v2])
+    vi.mocked(prisma.noteVersion.count).mockResolvedValue(2)
 
     const result = await noteVersionRepository.listByNoteId('note-1', { page: 1, limit: 20 })
 
@@ -53,7 +54,8 @@ describe('noteVersionRepository.listByNoteId', () => {
   })
 
   it('R02: calculates correct skip for page 2', async () => {
-    vi.mocked(prisma.$transaction).mockResolvedValue([[], 5])
+    vi.mocked(prisma.noteVersion.findMany).mockResolvedValue([])
+    vi.mocked(prisma.noteVersion.count).mockResolvedValue(5)
 
     await noteVersionRepository.listByNoteId('note-1', { page: 2, limit: 20 })
 
@@ -63,7 +65,8 @@ describe('noteVersionRepository.listByNoteId', () => {
   })
 
   it('R03: returns total from count', async () => {
-    vi.mocked(prisma.$transaction).mockResolvedValue([[], 7])
+    vi.mocked(prisma.noteVersion.findMany).mockResolvedValue([])
+    vi.mocked(prisma.noteVersion.count).mockResolvedValue(7)
 
     const result = await noteVersionRepository.listByNoteId('note-1', { page: 1, limit: 20 })
 

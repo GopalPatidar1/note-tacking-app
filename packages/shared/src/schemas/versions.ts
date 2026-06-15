@@ -1,15 +1,3 @@
-export interface NoteVersionDTO {
-  id:            string
-  noteId:        string
-  title:         string
-  content:       string
-  versionNumber: number
-  createdAt:     string
-}
-
-export interface PaginatedVersionsDTO {
-  items: NoteVersionDTO[]
-  total: number
-  page:  number
-  limit: number
-}
+// NoteVersionDTO and PaginatedVersionsDTO are defined in schemas/notes.ts
+// This file is kept for forwards compatibility; do not add new exports here.
+export {}

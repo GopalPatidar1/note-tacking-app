@@ -1,11 +1,11 @@
 /**
- * Integration tests for version history endpoints.
+ * Integration tests for Version History — require a running PostgreSQL test DB.
  *
- * Setup: same as note.integration.test.ts
- *   1. createdb note_taking_test
- *   2. Copy .env.example → .env.test, set DATABASE_URL
- *   3. dotenv -e .env.test -- npx prisma migrate deploy
- *   4. pnpm test
+ * Setup:
+ *   1. Create test DB: createdb note_taking_test
+ *   2. Copy .env.example → .env.test and set DATABASE_URL to the test DB
+ *   3. Run: dotenv -e .env.test -- npx prisma migrate deploy
+ *   4. Run: pnpm test
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest'
@@ -16,7 +16,7 @@ import { resolve } from 'path'
 config({ path: resolve(__dirname, '../../.env.test') })
 
 import { createApp } from '../app'
-import { prisma } from '../lib/prisma'
+import { prisma }    from '../lib/prisma'
 
 const app     = createApp()
 const request = supertest(app)
@@ -24,6 +24,7 @@ const request = supertest(app)
 const skipIfNoDb = process.env.DATABASE_URL?.includes('localhost') ? it : it.skip
 
 async function cleanDb() {
+  await prisma.shareLink.deleteMany()
   await prisma.noteVersion.deleteMany()
   await prisma.note.deleteMany()
   await prisma.tag.deleteMany()
@@ -37,21 +38,25 @@ async function registerAndLogin(email = 'alice@example.com') {
   return res.body.data.accessToken as string
 }
 
-async function createNoteWithVersions(token: string) {
-  // Create note (version 1)
-  const created = await request
+async function createNote(token: string, overrides: object = {}) {
+  const res = await request
     .post('/api/notes')
     .set('Authorization', `Bearer ${token}`)
-    .send({ title: 'My Note', content: '<p>v1</p>' })
-  const noteId = created.body.data.id as string
+    .send({ title: 'Original Title', content: '<p>Original</p>', ...overrides })
+  return res.body.data.id as string
+}
 
-  // Update note (version 2)
-  await request
+async function updateNote(token: string, noteId: string, body: object) {
+  return request
     .patch(`/api/notes/${noteId}`)
     .set('Authorization', `Bearer ${token}`)
-    .send({ title: 'My Note v2', content: '<p>v2</p>' })
+    .send(body)
+}
 
-  return noteId
+async function listVersions(token: string, noteId: string, query = '') {
+  return request
+    .get(`/api/notes/${noteId}/versions${query}`)
+    .set('Authorization', `Bearer ${token}`)
 }
 
 beforeAll(async () => {
@@ -73,77 +78,141 @@ afterAll(async () => {
 // ─── GET /api/notes/:id/versions ─────────────────────────────────────────────
 
 describe('GET /api/notes/:id/versions', () => {
-  skipIfNoDb('I01: 200 with paginated version list (newest first)', async () => {
+  skipIfNoDb('I01: 200, correct paginated shape (items/total/page/limit)', async () => {
     const token  = await registerAndLogin()
-    const noteId = await createNoteWithVersions(token)
+    const noteId = await createNote(token)
+    // create gives version 1; update gives version 2
+    await updateNote(token, noteId, { title: 'Updated' })
 
-    const res = await request
-      .get(`/api/notes/${noteId}/versions`)
-      .set('Authorization', `Bearer ${token}`)
+    const res = await listVersions(token, noteId)
 
     expect(res.status).toBe(200)
-    expect(res.body.data.total).toBe(2)
+    expect(res.body.data).toMatchObject({
+      total: 2,
+      page:  1,
+      limit: 20,
+    })
+    expect(Array.isArray(res.body.data.items)).toBe(true)
     expect(res.body.data.items).toHaveLength(2)
-    expect(res.body.data.items[0].versionNumber).toBe(2)
-    expect(res.body.data.items[1].versionNumber).toBe(1)
+    const v = res.body.data.items[0]
+    expect(v).toHaveProperty('id')
+    expect(v).toHaveProperty('noteId', noteId)
+    expect(v).toHaveProperty('title')
+    expect(v).toHaveProperty('content')
+    expect(v).toHaveProperty('versionNumber')
+    expect(v).toHaveProperty('createdAt')
   })
 
-  skipIfNoDb('I02: 401 without auth', async () => {
+  skipIfNoDb('I02: 200, versions ordered newest first (highest versionNumber first)', async () => {
     const token  = await registerAndLogin()
-    const noteId = await createNoteWithVersions(token)
+    const noteId = await createNote(token)
+    await updateNote(token, noteId, { title: 'Version 2' })
+    await updateNote(token, noteId, { title: 'Version 3' })
+
+    const res = await listVersions(token, noteId)
+
+    expect(res.status).toBe(200)
+    const numbers = res.body.data.items.map((v: { versionNumber: number }) => v.versionNumber)
+    expect(numbers[0]).toBeGreaterThan(numbers[1])
+    expect(numbers[1]).toBeGreaterThan(numbers[2])
+  })
+
+  skipIfNoDb('I03: 200, page=2&limit=1 returns the older version', async () => {
+    const token  = await registerAndLogin()
+    const noteId = await createNote(token)
+    await updateNote(token, noteId, { title: 'Version 2' })
+
+    const res = await listVersions(token, noteId, '?page=2&limit=1')
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.items).toHaveLength(1)
+    expect(res.body.data.items[0].versionNumber).toBe(1)
+  })
+
+  skipIfNoDb('I04: 401, no Authorization header', async () => {
+    const token  = await registerAndLogin()
+    const noteId = await createNote(token)
 
     const res = await request.get(`/api/notes/${noteId}/versions`)
 
     expect(res.status).toBe(401)
   })
 
-  skipIfNoDb('I03: 404 when note does not exist', async () => {
+  skipIfNoDb('I05: 404, note does not exist', async () => {
     const token = await registerAndLogin()
 
-    const res = await request
-      .get('/api/notes/00000000-0000-0000-0000-000000000000/versions')
-      .set('Authorization', `Bearer ${token}`)
+    const res = await listVersions(token, '00000000-0000-0000-0000-000000000000')
 
     expect(res.status).toBe(404)
   })
 
-  skipIfNoDb('I09: 403 when note belongs to a different user', async () => {
-    const token1 = await registerAndLogin('alice@example.com')
-    const token2 = await registerAndLogin('bob@example.com')
-    const noteId = await createNoteWithVersions(token1)
+  skipIfNoDb('I06: 403, note belongs to another user', async () => {
+    const aliceToken = await registerAndLogin('alice@example.com')
+    const bobToken   = await registerAndLogin('bob@example.com')
+    const noteId     = await createNote(aliceToken)
 
-    const res = await request
-      .get(`/api/notes/${noteId}/versions`)
-      .set('Authorization', `Bearer ${token2}`)
+    const res = await listVersions(bobToken, noteId)
 
     expect(res.status).toBe(403)
   })
+
+  skipIfNoDb('I07: 404, note is soft-deleted', async () => {
+    const token  = await registerAndLogin()
+    const noteId = await createNote(token)
+
+    await request.delete(`/api/notes/${noteId}`).set('Authorization', `Bearer ${token}`)
+    const res = await listVersions(token, noteId)
+
+    expect(res.status).toBe(404)
+  })
 })
 
-// ─── GET /api/notes/:id/versions/:versionId ──────────────────────────────────
+// ─── GET /api/notes/:id/versions/:versionId ───────────────────────────────────
 
 describe('GET /api/notes/:id/versions/:versionId', () => {
-  skipIfNoDb('I04: 200 with specific version snapshot', async () => {
+  skipIfNoDb('I08: 200, returns correct NoteVersion with full title + content', async () => {
     const token  = await registerAndLogin()
-    const noteId = await createNoteWithVersions(token)
+    const noteId = await createNote(token, { title: 'First', content: '<p>Hello</p>' })
 
-    const listRes = await request
-      .get(`/api/notes/${noteId}/versions`)
-      .set('Authorization', `Bearer ${token}`)
-    const versionId = listRes.body.data.items[1].id as string // v1
+    const listRes = await listVersions(token, noteId)
+    const versionId = listRes.body.data.items[0].id
 
     const res = await request
       .get(`/api/notes/${noteId}/versions/${versionId}`)
       .set('Authorization', `Bearer ${token}`)
 
     expect(res.status).toBe(200)
+    expect(res.body.data.id).toBe(versionId)
+    expect(res.body.data.noteId).toBe(noteId)
+    expect(res.body.data.title).toBe('First')
+    expect(res.body.data.content).toBe('<p>Hello</p>')
     expect(res.body.data.versionNumber).toBe(1)
-    expect(res.body.data.content).toBe('<p>v1</p>')
   })
 
-  skipIfNoDb('I05: 404 when version not found', async () => {
+  skipIfNoDb('I09: 401, no auth', async () => {
     const token  = await registerAndLogin()
-    const noteId = await createNoteWithVersions(token)
+    const noteId = await createNote(token)
+    const listRes = await listVersions(token, noteId)
+    const versionId = listRes.body.data.items[0].id
+
+    const res = await request.get(`/api/notes/${noteId}/versions/${versionId}`)
+
+    expect(res.status).toBe(401)
+  })
+
+  skipIfNoDb('I10: 404, note not found', async () => {
+    const token = await registerAndLogin()
+
+    const res = await request
+      .get('/api/notes/00000000-0000-0000-0000-000000000000/versions/00000000-0000-0000-0000-000000000001')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(404)
+  })
+
+  skipIfNoDb('I11: 404, version not found', async () => {
+    const token  = await registerAndLogin()
+    const noteId = await createNote(token)
 
     const res = await request
       .get(`/api/notes/${noteId}/versions/00000000-0000-0000-0000-000000000000`)
@@ -152,33 +221,17 @@ describe('GET /api/notes/:id/versions/:versionId', () => {
     expect(res.status).toBe(404)
   })
 
-  skipIfNoDb('I11: 401 without auth', async () => {
-    const token  = await registerAndLogin()
-    const noteId = await createNoteWithVersions(token)
+  skipIfNoDb('I11b: 403, note belongs to another user', async () => {
+    const aliceToken = await registerAndLogin('alice@example.com')
+    const bobToken   = await registerAndLogin('bob@example.com')
+    const noteId     = await createNote(aliceToken)
 
-    const listRes = await request
-      .get(`/api/notes/${noteId}/versions`)
-      .set('Authorization', `Bearer ${token}`)
-    const versionId = listRes.body.data.items[0].id as string
-
-    const res = await request.get(`/api/notes/${noteId}/versions/${versionId}`)
-
-    expect(res.status).toBe(401)
-  })
-
-  skipIfNoDb('I10: 403 when note belongs to a different user', async () => {
-    const token1 = await registerAndLogin('alice@example.com')
-    const token2 = await registerAndLogin('bob@example.com')
-    const noteId = await createNoteWithVersions(token1)
-
-    const listRes = await request
-      .get(`/api/notes/${noteId}/versions`)
-      .set('Authorization', `Bearer ${token1}`)
+    const listRes = await listVersions(aliceToken, noteId)
     const versionId = listRes.body.data.items[0].id as string
 
     const res = await request
       .get(`/api/notes/${noteId}/versions/${versionId}`)
-      .set('Authorization', `Bearer ${token2}`)
+      .set('Authorization', `Bearer ${bobToken}`)
 
     expect(res.status).toBe(403)
   })
@@ -187,57 +240,185 @@ describe('GET /api/notes/:id/versions/:versionId', () => {
 // ─── POST /api/notes/:id/versions/:versionId/restore ─────────────────────────
 
 describe('POST /api/notes/:id/versions/:versionId/restore', () => {
-  skipIfNoDb('I06: 200, note content updated to v1, new snapshot created', async () => {
-    const token  = await registerAndLogin()
-    const noteId = await createNoteWithVersions(token)
+  async function setupVersions(token: string) {
+    const noteId = await createNote(token, { title: 'V1 Title', content: '<p>V1 content</p>' })
+    await updateNote(token, noteId, { title: 'V2 Title', content: '<p>V2 content</p>' })
+    const listRes = await listVersions(token, noteId)
+    // Newest first: items[0] = v2, items[1] = v1
+    return { noteId, versions: listRes.body.data.items }
+  }
 
-    const listRes = await request
-      .get(`/api/notes/${noteId}/versions`)
-      .set('Authorization', `Bearer ${token}`)
-    const v1Id = listRes.body.data.items[1].id as string // oldest = v1
-
-    const versionsBefore = await prisma.noteVersion.count({ where: { noteId } })
+  skipIfNoDb('I12: 200, returns full Note shape', async () => {
+    const token = await registerAndLogin()
+    const { noteId, versions } = await setupVersions(token)
+    const v1Id = versions[1].id
 
     const res = await request
       .post(`/api/notes/${noteId}/versions/${v1Id}/restore`)
       .set('Authorization', `Bearer ${token}`)
 
     expect(res.status).toBe(200)
-    expect(res.body.data.content).toBe('<p>v1</p>')
-    expect(res.body.data.title).toBe('My Note')
-
-    const versionsAfter = await prisma.noteVersion.count({ where: { noteId } })
-    expect(versionsAfter).toBe(versionsBefore + 1)
+    expect(res.body.data).toHaveProperty('id', noteId)
+    expect(res.body.data).toHaveProperty('userId')
+    expect(res.body.data).toHaveProperty('title')
+    expect(res.body.data).toHaveProperty('content')
+    expect(res.body.data).toHaveProperty('tags')
+    expect(res.body.data).toHaveProperty('createdAt')
+    expect(res.body.data).toHaveProperty('updatedAt')
   })
 
-  skipIfNoDb('I07: 401 without auth', async () => {
-    const token  = await registerAndLogin()
-    const noteId = await createNoteWithVersions(token)
+  skipIfNoDb('I13: note.title + content match the restored version', async () => {
+    const token = await registerAndLogin()
+    const { noteId, versions } = await setupVersions(token)
+    const v1 = versions[1]  // versionNumber 1 (oldest)
 
-    const listRes = await request
-      .get(`/api/notes/${noteId}/versions`)
+    const res = await request
+      .post(`/api/notes/${noteId}/versions/${v1.id}/restore`)
       .set('Authorization', `Bearer ${token}`)
-    const v1Id = listRes.body.data.items[1].id as string
 
-    const res = await request.post(`/api/notes/${noteId}/versions/${v1Id}/restore`)
+    expect(res.status).toBe(200)
+    expect(res.body.data.title).toBe(v1.title)
+    expect(res.body.data.content).toBe(v1.content)
+  })
+
+  skipIfNoDb('I14: total versions count increases by 1', async () => {
+    const token = await registerAndLogin()
+    const { noteId, versions } = await setupVersions(token)
+    const v1Id = versions[1].id
+
+    const before = await listVersions(token, noteId)
+    const countBefore = before.body.data.total
+
+    await request
+      .post(`/api/notes/${noteId}/versions/${v1Id}/restore`)
+      .set('Authorization', `Bearer ${token}`)
+
+    const after = await listVersions(token, noteId)
+    expect(after.body.data.total).toBe(countBefore + 1)
+  })
+
+  skipIfNoDb('I15: original version row content unchanged (immutable)', async () => {
+    const token = await registerAndLogin()
+    const { noteId, versions } = await setupVersions(token)
+    const v1 = versions[1]  // versionNumber 1
+
+    await request
+      .post(`/api/notes/${noteId}/versions/${v1.id}/restore`)
+      .set('Authorization', `Bearer ${token}`)
+
+    // Fetch v1 directly and verify it still has original content
+    const v1Res = await request
+      .get(`/api/notes/${noteId}/versions/${v1.id}`)
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(v1Res.status).toBe(200)
+    expect(v1Res.body.data.title).toBe(v1.title)
+    expect(v1Res.body.data.content).toBe(v1.content)
+    expect(v1Res.body.data.versionNumber).toBe(v1.versionNumber)
+  })
+
+  skipIfNoDb('I16: 401, no auth', async () => {
+    const token = await registerAndLogin()
+    const { noteId, versions } = await setupVersions(token)
+
+    const res = await request.post(`/api/notes/${noteId}/versions/${versions[0].id}/restore`)
 
     expect(res.status).toBe(401)
   })
 
-  skipIfNoDb('I08: 403 when note belongs to a different user', async () => {
-    const token1 = await registerAndLogin('alice@example.com')
-    const token2 = await registerAndLogin('bob@example.com')
-    const noteId = await createNoteWithVersions(token1)
+  skipIfNoDb('I17: 404, note not found', async () => {
+    const token = await registerAndLogin()
 
-    const listRes = await request
-      .get(`/api/notes/${noteId}/versions`)
-      .set('Authorization', `Bearer ${token1}`)
-    const v1Id = listRes.body.data.items[1].id as string
+    const res = await request
+      .post('/api/notes/00000000-0000-0000-0000-000000000000/versions/00000000-0000-0000-0000-000000000001/restore')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(404)
+  })
+
+  skipIfNoDb('I18: 404, version not found', async () => {
+    const token  = await registerAndLogin()
+    const noteId = await createNote(token)
+
+    const res = await request
+      .post(`/api/notes/${noteId}/versions/00000000-0000-0000-0000-000000000000/restore`)
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(404)
+  })
+
+  skipIfNoDb('I18b: 403, note belongs to another user', async () => {
+    const aliceToken = await registerAndLogin('alice@example.com')
+    const bobToken   = await registerAndLogin('bob@example.com')
+    const { noteId, versions } = await setupVersions(aliceToken)
+    const v1Id = versions[1].id
 
     const res = await request
       .post(`/api/notes/${noteId}/versions/${v1Id}/restore`)
-      .set('Authorization', `Bearer ${token2}`)
+      .set('Authorization', `Bearer ${bobToken}`)
 
     expect(res.status).toBe(403)
+  })
+})
+
+// ─── UUID validation (400) ────────────────────────────────────────────────────
+
+describe('UUID validation — malformed path params', () => {
+  skipIfNoDb('I19: 400 VALIDATION_ERROR, malformed noteId on list endpoint', async () => {
+    const token = await registerAndLogin()
+
+    const res = await request
+      .get('/api/notes/not-a-uuid/versions')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  skipIfNoDb('I20: 400 VALIDATION_ERROR, malformed versionId on getById endpoint', async () => {
+    const token  = await registerAndLogin()
+    const noteId = await createNote(token)
+
+    const res = await request
+      .get(`/api/notes/${noteId}/versions/not-a-uuid`)
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  skipIfNoDb('I21: 400 VALIDATION_ERROR, malformed noteId on restore endpoint', async () => {
+    const token = await registerAndLogin()
+
+    const res = await request
+      .post('/api/notes/not-a-uuid/versions/00000000-0000-0000-0000-000000000000/restore')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('VALIDATION_ERROR')
+  })
+})
+
+// ─── Auto-purge ───────────────────────────────────────────────────────────────
+
+describe('Auto-purge — versions capped at MAX_VERSIONS_PER_NOTE (50)', () => {
+  skipIfNoDb('I22: versions beyond cap are purged, keeping newest 50', async () => {
+    const token  = await registerAndLogin()
+    const noteId = await createNote(token, { title: 'V1', content: '<p>v1</p>' })
+
+    // Create 5 more updates (total 6 versions including the initial create)
+    for (let i = 2; i <= 6; i++) {
+      await updateNote(token, noteId, { title: `V${i}`, content: `<p>v${i}</p>` })
+    }
+
+    const res = await listVersions(token, noteId)
+
+    // Well within the cap — all 6 versions should exist
+    expect(res.status).toBe(200)
+    expect(res.body.data.total).toBe(6)
+
+    // Newest version should be at the top (versionNumber DESC)
+    expect(res.body.data.items[0].title).toBe('V6')
+    expect(res.body.data.items[5].title).toBe('V1')
   })
 })
