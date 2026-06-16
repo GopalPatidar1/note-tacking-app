@@ -359,3 +359,7 @@ AB-1015  Frontend — Version history drawer + restore
 AB-1016 → Playwright E2E
 
 AB-1017 Generate Comprehensive README for AI-Powered Notes Application
+
+AB-1018: Generate Comprehensive README Documentation for the AI-Powered Notes Application Backend
+
+AB-1019: Generate Comprehensive README Documentation for the AI-Powered Notes Application Frontend

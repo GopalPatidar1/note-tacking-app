@@ -2,7 +2,7 @@ Run OpenSpec proposal creation for: $ARGUMENTS
 
 Steps:
 1.Run: openspec changes list
-2.Read: openspec/specs/ (current system state)
+2.Read: openspec/proposal/ (current system state)
 3.Read: docs/FRS.md → find relevant requirements for this ticket
 4.Read: docs/SDS.md → find relevant design decisions for this ticket
 5.Read: AGENTS.md (constraints)
