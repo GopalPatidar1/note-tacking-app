@@ -357,3 +357,5 @@ AB-1014  Frontend — Share modal + active links
 AB-1015  Frontend — Version history drawer + restore
 
 AB-1016 → Playwright E2E
+
+AB-1017 Generate Comprehensive README for AI-Powered Notes Application
