@@ -285,17 +285,22 @@ Rate Limiting:
 
 # Search Design
 
-PostgreSQL Full Text Search
+PostgreSQL pg_trgm trigram index
 
-Indexes:
+Query:
 
-* tsvector(title || content)
+* ILIKE '%keyword%' on notes.title
+* Case-insensitive; partial (substring) matches supported
 
-Functions:
+Index:
 
-* to_tsvector()
-* plainto_tsquery()
-* ts_headline()
+* GIN trigram index using gin_trgm_ops on notes.title
+* Effective for queries ≥ 3 characters; sequential scan for shorter queries
+
+Highlight:
+
+* Application-layer: matched substring wrapped in <b> tags via regex
+* No ts_headline — FTS functions not used
 
 ---
 

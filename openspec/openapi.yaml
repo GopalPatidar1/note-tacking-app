@@ -329,8 +329,10 @@ components:
           example: Meeting notes
         headline:
           type: string
-          description: ts_headline excerpt with match highlights (HTML tags)
-          example: "Discussed <b>Q3</b> roadmap with the team"
+          description: |
+            Note title with the matched keyword wrapped in <b> tags.
+            Constructed in application code from the raw title.
+          example: "hello <b>asad</b> world"
         tags:
           type: array
           items:
@@ -1020,10 +1022,13 @@ paths:
   /search:
     get:
       tags: [Search]
-      summary: Full-text search across note title and content
+      summary: Keyword search across note title with partial match support
       description: |
-        Uses PostgreSQL `plainto_tsquery` over a `tsvector(title || content)` index.
-        Results include `ts_headline` excerpts with match highlights.
+        Uses PostgreSQL `ILIKE '%keyword%'` on the note `title` column backed by a
+        `pg_trgm` GIN trigram index. Partial matches are supported — query "asad"
+        matches titles "asad123", "hello asad world", etc. Case-insensitive.
+        Results include a `headline` with the matched keyword wrapped in `<b>` tags.
+        Results ordered by `updatedAt DESC`.
       operationId: searchNotes
       security:
         - bearerAuth: []

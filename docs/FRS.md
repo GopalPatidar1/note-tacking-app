@@ -193,9 +193,10 @@ Users shall search notes.
 
 Acceptance Criteria:
 
-* PostgreSQL Full Text Search used.
+* Keyword search with partial (substring) match support.
+* Search is case-insensitive.
 * Search supports pagination.
-* Search highlights matching keywords.
+* Search highlights matching keywords in the title.
 
 ---
 

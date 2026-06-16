@@ -98,12 +98,12 @@ describe('GET /api/search — validation', () => {
   })
 })
 
-// ─── Basic search ─────────────────────────────────────────────────────────────
+// ─── Basic search (title-only ILIKE) ─────────────────────────────────────────
 
 describe('GET /api/search — basic results', () => {
-  skipIfNoDb('I01: 200 — returns matching note', async () => {
+  skipIfNoDb('I01: 200 — returns note whose title contains keyword', async () => {
     const token = await registerAndLogin()
-    await createNote(token, 'Meeting notes', 'We discussed the Q3 roadmap with the team')
+    await createNote(token, 'roadmap meeting notes', 'team sync')
 
     const res = await request
       .get('/api/search?q=roadmap')
@@ -111,26 +111,26 @@ describe('GET /api/search — basic results', () => {
 
     expect(res.status).toBe(200)
     expect(res.body.data.items).toHaveLength(1)
-    expect(res.body.data.items[0].title).toBe('Meeting notes')
+    expect(res.body.data.items[0].title).toBe('roadmap meeting notes')
     expect(res.body.data.total).toBe(1)
     expect(res.body.data.query).toBe('roadmap')
   })
 
-  skipIfNoDb('I02: headline contains <b> highlight tags', async () => {
+  skipIfNoDb('I02: headline contains <b> highlight tags wrapping the keyword', async () => {
     const token = await registerAndLogin()
-    await createNote(token, 'Meeting notes', 'We discussed the Q3 roadmap with the team')
+    await createNote(token, 'roadmap meeting notes', 'team sync')
 
     const res = await request
       .get('/api/search?q=roadmap')
       .set('Authorization', `Bearer ${token}`)
 
     expect(res.status).toBe(200)
-    expect(res.body.data.items[0].headline).toContain('<b>')
+    expect(res.body.data.items[0].headline).toContain('<b>roadmap</b>')
   })
 
-  skipIfNoDb('I05: 200 with empty items array when no match found', async () => {
+  skipIfNoDb('I05: 200 with empty items array when no title match found', async () => {
     const token = await registerAndLogin()
-    await createNote(token, 'Meeting notes', 'We discussed the Q3 roadmap')
+    await createNote(token, 'roadmap note', 'team sync')
 
     const res = await request
       .get('/api/search?q=xyz_nomatch_12345')
@@ -147,7 +147,7 @@ describe('GET /api/search — basic results', () => {
 describe('GET /api/search — scoping', () => {
   skipIfNoDb('I03: excludes soft-deleted notes', async () => {
     const token = await registerAndLogin()
-    const note = await createNote(token, 'Deleted note', 'This has the roadmap keyword')
+    const note = await createNote(token, 'roadmap deleted note', 'some content')
 
     await request
       .delete(`/api/notes/${note.id}`)
@@ -165,7 +165,7 @@ describe('GET /api/search — scoping', () => {
     const aliceToken = await registerAndLogin('alice@example.com')
     const bobToken   = await registerAndLogin('bob@example.com')
 
-    await createNote(aliceToken, 'Alice roadmap', 'Alice roadmap content')
+    await createNote(aliceToken, 'Alice roadmap note', 'Alice content')
 
     const res = await request
       .get('/api/search?q=roadmap')
@@ -181,9 +181,9 @@ describe('GET /api/search — scoping', () => {
 describe('GET /api/search — pagination', () => {
   skipIfNoDb('I06: returns correct page slice with limit=1 page=2', async () => {
     const token = await registerAndLogin()
-    await createNote(token, 'First hello note',  'hello world one')
-    await createNote(token, 'Second hello note', 'hello world two')
-    await createNote(token, 'Third hello note',  'hello world three')
+    await createNote(token, 'First hello note',  'content one')
+    await createNote(token, 'Second hello note', 'content two')
+    await createNote(token, 'Third hello note',  'content three')
 
     const res = await request
       .get('/api/search?q=hello&page=2&limit=1')
@@ -197,9 +197,9 @@ describe('GET /api/search — pagination', () => {
 
   skipIfNoDb('I07: total reflects full match count, not page size', async () => {
     const token = await registerAndLogin()
-    await createNote(token, 'First hello note',  'hello world one')
-    await createNote(token, 'Second hello note', 'hello world two')
-    await createNote(token, 'Third hello note',  'hello world three')
+    await createNote(token, 'First hello note',  'content one')
+    await createNote(token, 'Second hello note', 'content two')
+    await createNote(token, 'Third hello note',  'content three')
 
     const res = await request
       .get('/api/search?q=hello&page=1&limit=1')
@@ -223,7 +223,7 @@ describe('GET /api/search — tags', () => {
       .send({ name: 'Work', color: '#3B82F6' })
     const tagId = tagRes.body.data.id
 
-    await createNote(token, 'Tagged roadmap note', 'roadmap planning session', [tagId])
+    await createNote(token, 'Tagged roadmap note', 'planning session', [tagId])
 
     const res = await request
       .get('/api/search?q=roadmap')
@@ -241,21 +241,52 @@ describe('GET /api/search — tags', () => {
   })
 })
 
-// ─── Relevance ordering ───────────────────────────────────────────────────────
+// ─── Ordering ─────────────────────────────────────────────────────────────────
 
-describe('GET /api/search — relevance ordering', () => {
-  skipIfNoDb('I12: note with title + content match ranks above content-only match', async () => {
+describe('GET /api/search — ordering', () => {
+  skipIfNoDb('I12: results ordered by updatedAt DESC (most recently created first)', async () => {
     const token = await registerAndLogin()
 
-    await createNote(token, 'roadmap discussion',       'roadmap is mentioned in the title and here')
-    await createNote(token, 'Team meeting notes',       'we covered the roadmap in this meeting only in content')
+    await createNote(token, 'asad alpha note', 'content a')
+    await createNote(token, 'asad beta note',  'content b')
 
     const res = await request
-      .get('/api/search?q=roadmap')
+      .get('/api/search?q=asad')
       .set('Authorization', `Bearer ${token}`)
 
     expect(res.status).toBe(200)
     expect(res.body.data.items.length).toBeGreaterThanOrEqual(2)
-    expect(res.body.data.items[0].title).toBe('roadmap discussion')
+    expect(res.body.data.items[0].title).toBe('asad beta note')
+  })
+})
+
+// ─── Partial match (core AC) ──────────────────────────────────────────────────
+
+describe('GET /api/search — partial match', () => {
+  skipIfNoDb('I13: partial match — query "asad" matches title "asad123"', async () => {
+    const token = await registerAndLogin()
+    await createNote(token, 'asad123', 'some content')
+
+    const res = await request
+      .get('/api/search?q=asad')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.items).toHaveLength(1)
+    expect(res.body.data.items[0].title).toBe('asad123')
+    expect(res.body.data.items[0].headline).toBe('<b>asad</b>123')
+  })
+
+  skipIfNoDb('I14: case-insensitive — query "ASAD" matches title "hello asad world"', async () => {
+    const token = await registerAndLogin()
+    await createNote(token, 'hello asad world', 'some content')
+
+    const res = await request
+      .get('/api/search?q=ASAD')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.items).toHaveLength(1)
+    expect(res.body.data.items[0].title).toBe('hello asad world')
   })
 })
